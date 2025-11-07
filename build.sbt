@@ -3,7 +3,11 @@ ThisBuild / version := "0.1.0"
 ThisBuild / organization := "org.postech.csed332_25.red"
 
 lazy val commonSettings = Seq(
-  scalafmtOnCompile := true
+  scalafmtOnCompile := true,
+
+  // Dependencies
+  libraryDependencies += "org.scalatest" %% "scalatest" % "3.2.19" % "test",
+  libraryDependencies += "org.scalactic" %% "scalactic" % "3.2.19",
 )
 
 lazy val jobs = (project in file("jobs"))
