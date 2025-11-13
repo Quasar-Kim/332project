@@ -6,10 +6,11 @@ import redsort.jobs.JobRunner
 import redsort.jobs.fileserver.FileServer
 
 import scala.annotation.tailrec
-import io.grpc.{Server, ServerBuilder}
+import io.grpc.{Server, ServerBuilder, ManagedChannel, ManagedChannelBuilder}
 import scala.concurrent.ExecutionContext
 
 import redsort.jobs.messages.Job._
+import redsort.jobs.fileserver.InMemoryFileStorage
 
 case object ArgParser {
   def parse(args: Array[String]): Config = {
@@ -60,8 +61,10 @@ object Main {
     val masterPort: Int = config.address.split(":").last.toInt
 
     implicit val ec: ExecutionContext = ExecutionContext.global
-    val worker = new WorkerServiceImpl()
+    val fs = new InMemoryFileStorage
+    val worker = new WorkerServiceImpl(fs)
     var server: Server = null
+    var channel: ManagedChannel = null
 
     try {
       val serverDefinition = WorkerServiceGrpc.bindService(worker, ec)
@@ -69,6 +72,14 @@ object Main {
         .forPort(WorkerPort)
         .addService(serverDefinition)
         .build()
+
+      // Communication channel to Master server (not used currently)
+      // channel = ManagedChannelBuilder
+      //   .forAddress(masterIP, masterPort)
+      //   .usePlaintext()
+      //   .build()
+      // val clientStub = MasterServiceGrpc.stub(channel)
+
       server.start()
       println(s"Worker server started on port $WorkerPort")
       server.awaitTermination()

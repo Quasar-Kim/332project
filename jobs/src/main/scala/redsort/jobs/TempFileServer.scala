@@ -8,11 +8,21 @@ import java.util.concurrent.ConcurrentHashMap
 import scala.jdk.CollectionConverters._
 
 trait FileStorage {
-  def writeFile(fileName: String, data: Array[Byte]): Unit
-  def readFile(fileName: String): Option[Array[Byte]]
+  // Basic File Operations
+  // The names of methods related stream are different with original ones.
+  // This is to avoid ambiguity compile errors. 
+  def inputStream(fileName: String): InputStream
+  def outputStream(fileName: String): OutputStream
   def readNbytesFromFile(fileName: String, n: Int): Option[Array[Byte]]
   def renameFile(oldName: String, newName: String): Boolean
   def removeFile(fileName: String): Boolean
+  def listFiles(): List[String]
+  def fileSize(fileName: String): Option[Long]
+
+  // Debug
+  // In production, these methods may be dangerous for large files.
+  def writeFile(fileName: String, data: Array[Byte]): Boolean
+  def readFile(fileName: String): Option[Array[Byte]]
 }
 
 class InMemoryFileStorage extends FileStorage {
@@ -20,10 +30,31 @@ class InMemoryFileStorage extends FileStorage {
   private val fileStore: scala.collection.concurrent.Map[String, Array[Byte]] =
     new ConcurrentHashMap[String, Array[Byte]]().asScala
 
-  override def writeFile(fileName: String, data: Array[Byte]): Unit = {
-    fileStore.put(fileName, data)
+  override def inputStream(fileName: String): InputStream = {
+    fileStore.get(fileName) match {
+      case Some(data) => new ByteArrayInputStream(data)
+      case None       => throw new FileNotFoundException(s"File not found in memory: $fileName")
+    }
   }
 
+  override def outputStream(fileName: String): OutputStream = {
+    new ByteArrayOutputStream() {
+      override def close(): Unit = {
+        try {
+          fileStore.put(fileName, this.toByteArray)
+        } finally {
+          super.close()
+        }
+      }
+    }
+  }
+
+  // Debug!
+  override def writeFile(fileName: String, data: Array[Byte]): Boolean = {
+    fileStore.put(fileName, data)
+    true
+  }
+  // Debug!
   override def readFile(fileName: String): Option[Array[Byte]] = {
     fileStore.get(fileName)
   }
@@ -49,6 +80,14 @@ class InMemoryFileStorage extends FileStorage {
     fileStore.synchronized {
       fileStore.remove(fileName).isDefined
     }
+  }
+
+  override def listFiles(): List[String] = {
+    fileStore.keys.toList
+  }
+
+  override def fileSize(fileName: String): Option[Long] = {
+    fileStore.get(fileName).map(_.length.toLong)
   }
 
   // Only for debug!
