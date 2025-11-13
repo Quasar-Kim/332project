@@ -2,8 +2,10 @@ ThisBuild / scalaVersion := "2.13.16"
 ThisBuild / version := "0.1.0"
 ThisBuild / organization := "org.postech.csed332_25.red"
 
+
 lazy val commonSettings = Seq(
   scalafmtOnCompile := true,
+  resolvers += "Artima Maven Repository" at "https://repo.artima.com/releases",
 
   // Dependencies
   libraryDependencies += "org.scalatest" %% "scalatest" % "3.2.19" % "test",
