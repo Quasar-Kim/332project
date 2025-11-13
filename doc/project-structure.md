@@ -21,4 +21,4 @@ Protocol buffers definitions resides in `redsort.jobs.messages` package, and sou
 
 ## Deploying
 
-Run `assembly` job to create jar file for master and worker. For example, `master.jar` will be generated at `jobs/target/scala_2.13` directory. In production we can write a small script named `master` that runs `java -jar master.jar` (with command line arguments).
+Run `assembly` job to create jar file for master and worker. For example, `master.jar` will be generated at `master/target/scala_2.13` directory. In production we can write a small script named `master` that runs `java -jar master.jar` (with command line arguments).

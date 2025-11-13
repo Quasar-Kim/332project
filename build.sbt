@@ -8,6 +8,14 @@ lazy val commonSettings = Seq(
   // Dependencies
   libraryDependencies += "org.scalatest" %% "scalatest" % "3.2.19" % "test",
   libraryDependencies += "org.scalactic" %% "scalactic" % "3.2.19",
+  libraryDependencies += "com.google.protobuf" % "protobuf-java" % "3.25.3" % "protobuf",
+  libraryDependencies += "com.github.scopt" %% "scopt" % "4.1.0",
+  libraryDependencies += "com.thesamet.scalapb" %% "scalapb-runtime" % scalapb.compiler.Version.scalapbVersion % "protobuf",
+  libraryDependencies += "io.grpc" % "grpc-netty-shaded" % "1.60.0",
+  libraryDependencies += "org.scalamock" %% "scalamock" % "5.2.0" % Test,
+  Compile / PB.targets := Seq(
+    scalapb.gen() -> (Compile / sourceManaged).value / "scalapb"
+  ),
 )
 
 lazy val jobs = (project in file("jobs"))
@@ -18,9 +26,6 @@ lazy val master = (project in file("master"))
   .settings(commonSettings)
   .settings(
     assembly / assemblyJarName := "master.jar",
-    Compile / PB.targets := Seq(
-      scalapb.gen() -> (Compile / sourceManaged).value / "scalapb"
-    )
   )
   .dependsOn(jobs)
 

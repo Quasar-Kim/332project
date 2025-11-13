@@ -1,6 +1,97 @@
 syntax = "proto3";
 
 package redsort.jobs.messages;
-message Job {
-  string name = 1;
+
+import "google/protobuf/empty.proto";
+
+// ----------------- Common -----------------
+message Wid {
+  int32 mid = 1;
+  int32 wtid = 2;
 }
+
+// ----------------- Storage -----------------
+message FileEntry {
+  string path = 1;
+  int32 size = 2;
+  repeated int32 replicas = 3;
+}
+
+message LocalStorageInfo {
+  map<string, FileEntry> entries = 1;
+  int32 remainingStorage = 2;
+  optional int32 mid = 3;
+
+}
+
+// ----------------- Job -----------------
+
+enum JobType {
+  Sampling = 0;
+  Sorting = 1;
+  Partitioning = 2;
+  Merging = 3;
+}
+
+message JobSpec {
+  JobType jobType = 1;
+  repeated string args = 2;
+  repeated FileEntry inputs = 3;
+  repeated FileEntry outputs = 4;
+  int32 outputSize = 5;
+  string jid = 6;
+}
+
+message JobResult {
+  bool success = 1;
+  repeated FileEntry outputs = 2;
+  repeated ReplicationDiagnostics inputReplications = 3;
+  repeated ReplicationDiagnostics outputReplications = 4;
+  int32 calculationTime = 5;
+  optional WorkerError error = 6;
+  string jid = 7;
+}
+
+enum WorkerErrorKind {           
+  InputReplicationError = 0;
+  BodyFuncError = 1;
+  OutputReplicationError = 2;
+  WorkerBusy = 3;
+}
+
+message ReplicationDiagnostics {
+  FileEntry entry = 1;
+  int32 src = 2;
+  int32 dst = 3;
+  float start = 4;
+  float end = 5;
+}
+
+message WorkerError {
+  WorkerErrorKind kind = 1;
+  string msg = 2;
+  optional FileEntry entry = 3;
+}
+
+// ----------------- Initialization -----------------
+message WorkerHello {
+  int32 wtid = 1;
+  optional LocalStorageInfo storageInfo = 2;
+}
+
+message SchedulerHello {
+  string wid = 1;
+}
+
+// ----------------- Service -----------------
+service WorkerService {
+  // master --> worker
+  rpc SubmitJob(JobSpec) returns (JobResult);
+}
+
+service MasterService {
+  // worker --> master
+  rpc Hello(WorkerHello) returns (SchedulerHello);
+  rpc NotifyUp(google.protobuf.Empty) returns (google.protobuf.Empty);
+}
+  
