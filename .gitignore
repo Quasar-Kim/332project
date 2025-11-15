@@ -3,3 +3,4 @@
 .scala-build/
 .bsp/
 target/
+project/metals.sbt
