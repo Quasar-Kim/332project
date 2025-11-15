@@ -8,7 +8,7 @@
 - Established the initial code scaffolding for the project.
 - Documented the Project Structure (`doc/project-structure.md`) and Coding Standard (`doc/coding-standard.md`).
 - Determined presentation roles and contents.
-- Created [new revision](doc/design-doc-draft-3.pdf) of design documentation.
+- Created [new revision](doc/high-level/design-doc-draft-3.pdf) of design documentation.
 
 ## Goal of the next week
 
