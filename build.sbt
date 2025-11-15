@@ -17,9 +17,6 @@ lazy val master = (project in file("master"))
   .settings(commonSettings)
   .settings(
     assembly / assemblyJarName := "master.jar",
-    Compile / PB.targets := Seq(
-      scalapb.gen() -> (Compile / sourceManaged).value / "scalapb"
-    )
   )
   .dependsOn(jobs)
 
