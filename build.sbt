@@ -10,7 +10,10 @@ lazy val commonSettings = Seq(
 )
 
 lazy val jobs = (project in file("jobs"))
-  .settings(commonSettings)
+  .settings(
+    commonSettings,
+    scalapbCodeGeneratorOptions += CodeGeneratorOption.FlatPackage,
+  )
   .enablePlugins(Fs2Grpc)
 
 lazy val master = (project in file("master"))
