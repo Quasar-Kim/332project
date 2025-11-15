@@ -1,26 +1,25 @@
+import Dependencies._
+
 ThisBuild / scalaVersion := "2.13.16"
 ThisBuild / version := "0.1.0"
 ThisBuild / organization := "org.postech.csed332_25.red"
 
 lazy val commonSettings = Seq(
   scalafmtOnCompile := true,
-
-  // Dependencies
-  libraryDependencies += "org.scalatest" %% "scalatest" % "3.2.19" % "test",
-  libraryDependencies += "org.scalactic" %% "scalactic" % "3.2.19",
+  libraryDependencies ++= deps
 )
 
 lazy val jobs = (project in file("jobs"))
-  .settings(commonSettings)
+  .settings(
+    commonSettings,
+    scalapbCodeGeneratorOptions += CodeGeneratorOption.FlatPackage,
+  )
   .enablePlugins(Fs2Grpc)
 
 lazy val master = (project in file("master"))
   .settings(commonSettings)
   .settings(
     assembly / assemblyJarName := "master.jar",
-    Compile / PB.targets := Seq(
-      scalapb.gen() -> (Compile / sourceManaged).value / "scalapb"
-    )
   )
   .dependsOn(jobs)
 
