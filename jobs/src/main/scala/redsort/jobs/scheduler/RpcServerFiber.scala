@@ -10,20 +10,24 @@ import redsort.jobs.messages._
 import com.google.protobuf.empty.Empty
 
 class SchedulerRpcService extends SchedulerFs2Grpc[IO, Metadata] {
-  override def haltOnError(request: JobSystemError, ctx: A): IO[Empty] = 
-    IO.pure(Empty)
+  override def haltOnError(request: JobSystemError, ctx: Metadata): IO[Empty] =
+    IO.pure(new Empty())
+
+  override def notifyUp(request: Empty, ctx: Metadata): IO[Empty] = ???
+
+  override def registerWorker(request: WorkerHello, ctx: Metadata): IO[SchedulerHello] = ???
 }
 
-object RpcServer {
+object RpcServerFiber {
   private def grpcService: Resource[IO, ServerServiceDefinition] =
     SchedulerFs2Grpc.bindServiceResource[IO](new SchedulerRpcService)
-  
-  def start: IO[Nothing] = grpcService.use(service =>
+
+  def start: IO[Unit] = grpcService.use(service =>
     NettyServerBuilder
       .forPort(5000)
       .addService(service)
       .resource[IO]
       .evalMap(server => IO(server.start()))
       .useForever
-  )
+  ) >> IO.unit
 }
