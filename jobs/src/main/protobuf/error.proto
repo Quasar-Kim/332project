@@ -1,0 +1,10 @@
+syntax = "proto3";
+
+package redsort.jobs.messages;
+
+message JobSystemError {
+  string message = 1;
+  optional JobSystemError cause = 2;
+  map<string, string> context = 3;
+}
+

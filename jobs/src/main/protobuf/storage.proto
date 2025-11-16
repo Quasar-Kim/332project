@@ -1,0 +1,15 @@
+syntax = "proto3";
+
+package redsort.jobs.messages;
+
+message LocalStorageInfo {
+    optional int32 mid = 1;
+    int32 remainingStorage = 2;
+    map<string, FileEntry> entries = 3;
+}
+
+message FileEntry {
+    string path = 1;
+    int32 size = 2;
+    repeated int32 replicas = 3;
+}
