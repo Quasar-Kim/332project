@@ -1,6 +1,0 @@
-syntax = "proto3";
-
-package redsort.jobs.messages;
-message Job {
-  string name = 1;
-}
