@@ -7,9 +7,12 @@ import redsort.jobs.Common._
 import scala.concurrent.duration._
 
 object WorkerRpcClientFiber {
-  def start(wid: Wid): IO[Unit] = for {
-    _ <- IO.println(s"hello from rpc client $wid")
+  def start(state: Ref[IO, SharedState], wid: Wid): Resource[IO, Unit] =
+    main(state).background.evalMap(_ => IO.unit)
+
+  private def main(state: Ref[IO, SharedState]): IO[Unit] = for {
+    _ <- IO.println("worker fiber running")
     _ <- IO.sleep(1.second)
-    _ <- start(wid)
+    _ <- main(state)
   } yield ()
 }

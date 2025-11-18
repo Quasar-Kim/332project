@@ -6,7 +6,8 @@ ThisBuild / organization := "org.postech.csed332_25.red"
 
 lazy val commonSettings = Seq(
   scalafmtOnCompile := true,
-  libraryDependencies ++= deps
+  libraryDependencies ++= deps,
+  Compile / run / fork := true,
 )
 
 lazy val jobs = (project in file("jobs"))

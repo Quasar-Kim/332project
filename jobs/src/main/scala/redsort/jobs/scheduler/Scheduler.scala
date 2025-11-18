@@ -2,19 +2,37 @@ package redsort.jobs.scheduler
 
 import cats._
 import cats.effect._
-import cats.syntax._
+import cats.effect.std.Supervisor
+import cats.syntax.all._
 import redsort.jobs.Common._
+import scala.collection.immutable.Queue
 
-trait Scheduler {
-  def start: IO[Unit]
-}
+trait Scheduler {}
 
 object Scheduler {
-  def apply(workers: Seq[NetAddr]): IO[Scheduler] =
-    IO.pure(new Scheduler {
-      override def start: IO[Unit] = for {
-        _ <- (RpcServerFiber.start, SchedulerFiber.start, WorkerRpcClientFiber.start(Wid(0, 0)))
-          .parMapN((_, _, _) => IO.unit)
-      } yield ()
-    })
+  def apply(workers: Seq[Seq[NetAddr]]): Resource[IO, Scheduler] =
+    for {
+      supervisor <- Supervisor[IO]
+      _ <- Resource.eval {
+        for {
+          workerAddrs <- workerAddresses(workers)
+          stateR <- SharedState.init(workerAddrs)
+          _ <- (
+            supervisor.supervise(RpcServerFiber.start(stateR).useForever),
+            supervisor.supervise(SchedulerFiber.start(stateR).useForever),
+            workerAddrs.keys.toList.parTraverse_ { wid =>
+              supervisor.supervise(WorkerRpcClientFiber.start(stateR, wid).useForever)
+            }
+          ).parTupled.void
+        } yield ()
+      }
+    } yield new Scheduler {}
+
+  def workerAddresses(workers: Seq[Seq[NetAddr]]): IO[Map[Wid, NetAddr]] = {
+    val entries = for {
+      (inner, mid) <- workers.zipWithIndex
+      (addr, wtid) <- inner.zipWithIndex
+    } yield (new Wid(mid, wtid), addr)
+    IO.pure(entries.toMap)
+  }
 }
