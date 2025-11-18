@@ -1,0 +1,40 @@
+syntax = "proto3";
+
+package redsort.jobs.messages;
+import "google/protobuf/empty.proto";
+import "google/protobuf/any.proto";
+
+import "jobs.proto";
+import "error.proto";
+
+service Worker {
+  rpc RunJob(JobSpecMsg) returns (JobResult);
+  rpc Halt(WorkerHaltRequest) returns (google.protobuf.Empty);
+}
+
+message JobResult {
+  bool success = 1;
+  google.protobuf.Any retval = 2;
+  optional WorkerError error = 3;
+  optional JobExecutionStats stats = 4;
+}
+
+message WorkerError {
+  WorkerErrorKind kind = 1;
+  JobSystemError inner = 2;
+}
+
+enum WorkerErrorKind {
+  INPUT_REPLICATION_ERROR = 0;
+  BODY_ERROR = 1;
+  OUTPUT_REPLICATION_ERROR = 2;
+  WORKER_BUSY = 3;
+}
+
+message JobExecutionStats {
+  int32 calculationTime = 1;
+}
+
+message WorkerHaltRequest {
+  string msg = 1;
+}
