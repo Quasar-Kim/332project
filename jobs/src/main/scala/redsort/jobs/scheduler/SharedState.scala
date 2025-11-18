@@ -7,6 +7,7 @@ import cats.syntax.all._
 import redsort.jobs.Common._
 import redsort.jobs.scheduler
 import redsort.jobs.{messages => msg}
+import com.google.protobuf.any
 
 /** Shared states among all fibers. Some fields are owned by a specific fiber, which can be read by
   * anyone but only written by owner. Remaining fields are input queue of fibers.
@@ -25,9 +26,7 @@ import redsort.jobs.{messages => msg}
 final case class SharedState(
     schedulerFiber: SchedulerFiberState,
     rpcClientFibers: Map[Wid, RpcClientFiberState],
-    rpcServerFiber: RpcServerFiberState,
-    schedulerFiberQueue: Queue[SchedulerFiberEvents],
-    rpcClientFiberQueues: Map[Wid, Queue[WorkerFiberEvents]]
+    rpcServerFiber: RpcServerFiberState
 )
 
 object SharedState {
@@ -35,17 +34,11 @@ object SharedState {
     val initialSchedulerFiber = SchedulerFiberState.init(workers)
     val initialRpcClientFibers = workers.map { case (wid, _) => (wid, RpcClientFiberState.init) }
     val initialRpcServerFiber = RpcServerFiberState.init
-    val initialSchedulerQueue = Queue.empty[SchedulerFiberEvents]
-    val initialRpcClientQueues = workers.map { case (wid, _) =>
-      (wid, Queue.empty[WorkerFiberEvents])
-    }
 
     val initialState = SharedState(
       schedulerFiber = initialSchedulerFiber,
       rpcClientFibers = initialRpcClientFibers,
-      rpcServerFiber = initialRpcServerFiber,
-      schedulerFiberQueue = initialSchedulerQueue,
-      rpcClientFiberQueues = initialRpcClientQueues
+      rpcServerFiber = initialRpcServerFiber
     )
 
     Ref.of[IO, SharedState](initialState)
@@ -169,6 +162,26 @@ final case class JobSpec(
     outputs: Seq[FileEntry],
     outputSize: Int
 )
+object JobSpec {
+  def toMsg(spec: JobSpec): msg.JobSpecMsg =
+    new msg.JobSpecMsg(
+      name = spec.name,
+      // XXX: how to convert Any to protobuf Any?
+      args = Seq(),
+      inputs = spec.inputs.map(FileEntry.toMsg),
+      outputs = spec.outputs.map(FileEntry.toMsg),
+      outputSize = spec.outputSize
+    )
+
+  def fromMsg(m: msg.JobSpecMsg): JobSpec =
+    new JobSpec(
+      name = m.name,
+      args = m.args,
+      inputs = m.inputs.map(FileEntry.fromMsg),
+      outputs = m.outputs.map(FileEntry.fromMsg),
+      outputSize = m.outputSize
+    )
+}
 
 final case class RpcClientFiberState()
 
@@ -216,4 +229,8 @@ object SchedulerFiberEvents {
 }
 
 sealed abstract class WorkerFiberEvents
-object WorkerFiberEvents {}
+object WorkerFiberEvents {
+  final case class Job(spec: JobSpec) extends WorkerFiberEvents
+  final case object WorkerDown
+  final case object WorkerUp
+}
