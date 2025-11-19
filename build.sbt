@@ -8,6 +8,9 @@ ThisBuild / organization := "org.postech.csed332_25.red"
 // buffering algorithm.
 Test / logBuffered := false
 
+// Required by artima supersafe plugin, which comes with sclatest
+ThisBuild / resolvers += "Artima Maven Repository" at "https://repo.artima.com/releases"
+
 lazy val commonSettings = Seq(
   scalafmtOnCompile := true,
   libraryDependencies ++= deps,
