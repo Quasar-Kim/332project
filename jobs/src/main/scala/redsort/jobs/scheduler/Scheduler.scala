@@ -24,7 +24,9 @@ object Scheduler {
             supervisor.supervise(SchedulerFiber.start(stateR).useForever),
             workerAddrs.keys.toList.parTraverse_ { wid =>
               supervisor.supervise(
-                WorkerRpcClientFiber.start(stateR, wid, rpcClientFiberQueues(wid), ctx).useForever
+                WorkerRpcClientFiber
+                  .start(stateR, wid, rpcClientFiberQueues(wid), schedulerFiberQueue, ctx)
+                  .useForever
               )
             }
           ).parTupled.void

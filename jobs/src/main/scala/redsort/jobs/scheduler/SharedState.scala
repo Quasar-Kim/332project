@@ -225,7 +225,12 @@ object SchedulerFiberEvents {
   // == sent by RPC client fiber:
 
   final case class JobCompleted(result: msg.JobResult, from: Wid) extends SchedulerFiberEvents
+  final case class JobFailed(result: msg.JobResult, from: Wid) extends SchedulerFiberEvents
+  final case class WorkerNotResponding(from: Wid) extends SchedulerFiberEvents
 
+  // == can be sent by anyone:
+
+  final case class FatalError(error: Throwable) extends SchedulerFiberEvents
 }
 
 sealed abstract class WorkerFiberEvents

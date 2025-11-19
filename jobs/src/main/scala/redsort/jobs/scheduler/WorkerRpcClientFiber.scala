@@ -9,38 +9,50 @@ import scala.concurrent.duration._
 import redsort.jobs.messages.WorkerFs2Grpc
 import io.grpc.Metadata
 import redsort.jobs.context.interface.WorkerRpcClient
+import redsort.jobs.scheduler
 
 object WorkerRpcClientFiber {
   def start(
       stateR: Ref[IO, SharedState],
       wid: Wid,
-      queue: Queue[IO, WorkerFiberEvents],
+      inputQueue: Queue[IO, WorkerFiberEvents],
+      schedulerFiberQueue: Queue[IO, SchedulerFiberEvents],
       ctx: WorkerRpcClient
   ): Resource[IO, Unit] =
     ctx
       .workerRpcClient(5000)
-      .flatMap(rpcClient => main(stateR, wid, queue, rpcClient).background)
+      .flatMap(rpcClient =>
+        main(stateR, wid, inputQueue, schedulerFiberQueue, rpcClient).background
+      )
       .evalMap(_ => IO.unit)
 
   private def main(
       stateR: Ref[IO, SharedState],
       wid: Wid,
       queue: Queue[IO, WorkerFiberEvents],
+      schedulerFiberQueue: Queue[IO, SchedulerFiberEvents],
       rpcClient: WorkerFs2Grpc[IO, Metadata]
   ): IO[Unit] = for {
     event <- queue.take
-    _ <- handleEvent(stateR, wid, event, rpcClient)
-    _ <- main(stateR, wid, queue, rpcClient)
+    _ <- handleEvent(stateR, wid, event, schedulerFiberQueue, rpcClient)
+    _ <- main(stateR, wid, queue, schedulerFiberQueue, rpcClient)
   } yield ()
 
   private def handleEvent(
       stateR: Ref[IO, SharedState],
       wid: Wid,
       event: WorkerFiberEvents,
+      schedulerFiberQueue: Queue[IO, SchedulerFiberEvents],
       rpcClient: WorkerFs2Grpc[IO, Metadata]
   ): IO[Unit] = event match {
     case WorkerFiberEvents.Job(spec) =>
-      rpcClient.runJob(JobSpec.toMsg(spec), new Metadata) >> IO.unit
+      for {
+        result <- rpcClient.runJob(JobSpec.toMsg(spec), new Metadata)
+        _ <- schedulerFiberQueue.offer(
+          if (result.success) new SchedulerFiberEvents.JobCompleted(result, wid)
+          else new SchedulerFiberEvents.JobFailed(result, wid)
+        )
+      } yield ()
     case _ => ???
   }
 }
