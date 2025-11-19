@@ -210,22 +210,27 @@ object SchedulerFiberEvents {
 
   /** WorkerHello RPC method has been called with argument `hello`.
     */
-  final case class WorkerRegistration(hello: msg.WorkerHello)
+  final case class WorkerRegistration(hello: msg.WorkerHello) extends SchedulerFiberEvents
 
   /** Worker did not called Heartbeat RPC method in timeout.
     *
     * @param from
     */
-  final case class HeartbeatTimeout(from: Wid)
+  final case class HeartbeatTimeout(from: Wid) extends SchedulerFiberEvents
 
   /** Worker requested system halt.
     */
-  final case class Halt(err: msg.JobSystemError, from: Wid)
+  final case class Halt(err: msg.JobSystemError, from: Wid) extends SchedulerFiberEvents
 
   // == sent by RPC client fiber:
 
-  final case class JobCompleted(result: msg.JobResult, from: Wid)
+  final case class JobCompleted(result: msg.JobResult, from: Wid) extends SchedulerFiberEvents
+  final case class JobFailed(result: msg.JobResult, from: Wid) extends SchedulerFiberEvents
+  final case class WorkerNotResponding(from: Wid) extends SchedulerFiberEvents
 
+  // == can be sent by anyone:
+
+  final case class FatalError(error: Throwable) extends SchedulerFiberEvents
 }
 
 sealed abstract class WorkerFiberEvents
