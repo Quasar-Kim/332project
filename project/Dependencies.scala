@@ -8,6 +8,7 @@ object Dependencies {
     val catsEffect = "org.typelevel" %% "cats-effect" % "3.6.3"
     val log4cats = "org.typelevel" %% "log4cats-slf4j" % "2.7.1"
     val grpcNetty = "io.grpc" % "grpc-netty-shaded" % scalapb.compiler.Version.grpcJavaVersion
+    val scalapbRuntime = "com.thesamet.scalapb" %% "scalapb-runtime" % scalapb.compiler.Version.scalapbVersion % "protobuf"
 
     // -- testing deps
     val scalaTest = "org.scalatest" %% "scalatest" % "3.2.19" % "test"
@@ -26,5 +27,6 @@ object Dependencies {
         scalamock,
         scalamockCatsEffect,
         catsEffectTestingScalaTest,
+        scalapbRuntime,
     )
 }

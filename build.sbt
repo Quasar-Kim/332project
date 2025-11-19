@@ -4,9 +4,14 @@ ThisBuild / scalaVersion := "2.13.16"
 ThisBuild / version := "0.1.0"
 ThisBuild / organization := "org.postech.csed332_25.red"
 
+// Scalatest recommends turning this off since it implmenets its own
+// buffering algorithm.
+Test / logBuffered := false
+
 lazy val commonSettings = Seq(
   scalafmtOnCompile := true,
-  libraryDependencies ++= deps
+  libraryDependencies ++= deps,
+  Compile / run / fork := true,
 )
 
 lazy val jobs = (project in file("jobs"))
