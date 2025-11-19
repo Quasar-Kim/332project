@@ -234,12 +234,14 @@ Upon start, scheduler fiber runs as follows:
 
 1. Dequeue `msg` from input queue.
 2. If `msg` is `Job(spec)`, then race following two operations: 1) Calling RPC method RunJob(spec), and 2) dequeueing another `msg` from input queue.
-    1. If RPC method was completed first, then check if job execution suiccessful.
+    1. If RPC method was completed first, then check if job execution was successful.
         1. If successful, then enqueue `JobCompleted` to input queue of scheduler fiber.
         2. If unsuccessful, then enqueue `JobFailed`.
     2. If `msg` was received first, then it must be `WorkerDown`. Wait for another message which must be `WorkerUp`.
     3. If it errors, then it must be raised from RPC client.
         1. If error is due to problem in underlying connection (connection failed or aborted, and so on), enqueue `WorkerNotResponding` to input queue of scheduler fiber, then flush input queue until `WorkerUp` is received.
+3. If `msg` is `WorkerDown`, flush input queue until `WorkerUp` is received.
+4. If `msg` is `WorkerUp`, ignore.
 
 ### RPC Server Behavior
 
@@ -247,7 +249,7 @@ Upon start, scheduler fiber runs as follows:
     1. Enqueue `WorkerHello` message to input queue of scheduler fiber.
     2. Send back `SchedulerHello` with appropriate worker ID.
 - method NotifyUp:
-    - Enqueue `WorkerHello` message to input queue of scheduler fiber.
+    - Prevent `HeartbeatTimeout` messagee to be sent to scheduler fiber.
 - method HaltOnError:
     - Enqueue `Halt` message to input queue of scheduler fiber.
 
@@ -592,5 +594,6 @@ As discussed earlier, we define `AppContext` with two subtypes `Production` and 
 
 … and also following typeclasses that combines some of above typeclasses for cleaner function signature:
 
-- `ReplicatorIO[E]`: `Files` + `ReplicatorRemoteServer` + `ReplicatorLocalServer` + `ReplicatorRemoteClient`
-- `WorkerIO[E]`: `Files` + `WorkerServer` + `SchedulerClient` + `ReplicatorLocalClient`
+- `ReplicatorCtx[E]`: `Files` + `ReplicatorRemoteServer` + `ReplicatorLocalServer` + `ReplicatorRemoteClient`
+- `WorkerCtx[E]`: `Files` + `WorkerServer` + `SchedulerClient` + `ReplicatorLocalClient`
+- `SchedulerCtx[E]`: `WorkerClient` + `SchedulerServer`
