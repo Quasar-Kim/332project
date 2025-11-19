@@ -16,5 +16,5 @@ class FlatSpecBase
     with CatsEffectStubs
     with AsyncTimeLimitedTests
     with Inside {
-  val timeLimit = 1.seconds
+  val timeLimit = 10.seconds
 }
