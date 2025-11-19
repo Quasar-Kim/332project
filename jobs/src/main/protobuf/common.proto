@@ -1,0 +1,8 @@
+syntax = "proto3";
+
+package redsort.jobs.messages;
+
+message WidMsg {
+  int32 mid = 1;
+  int32 wtid = 2;
+}

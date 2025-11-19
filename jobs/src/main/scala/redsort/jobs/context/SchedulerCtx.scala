@@ -1,5 +1,5 @@
 package redsort.jobs.context
 
-import redsort.jobs.context.interface.WorkerRpcClient
+import redsort.jobs.context.interface._
 
-trait SchedulerCtx extends WorkerRpcClient
+trait SchedulerCtx extends WorkerRpcClient with SchedulerRpcServer

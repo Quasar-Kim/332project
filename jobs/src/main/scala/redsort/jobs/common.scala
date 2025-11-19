@@ -1,6 +1,7 @@
 package redsort.jobs
 
 import redsort.jobs.messages.FileEntryMsg
+import redsort.jobs.messages.WidMsg
 
 object Common {
 
@@ -12,6 +13,13 @@ object Common {
     *   worker thread ID.
     */
   final case class Wid(mid: Mid, wtid: Wtid)
+  object Wid {
+    def fromMsg(msg: WidMsg): Wid =
+      new Wid(mid = msg.mid, wtid = msg.wtid)
+
+    def toMsg(wid: Wid): WidMsg =
+      new WidMsg(mid = wid.mid, wtid = wid.wtid)
+  }
 
   type Mid = Int
   type Wtid = Int

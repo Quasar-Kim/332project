@@ -8,30 +8,54 @@ import fs2.grpc.syntax.all._
 import io.grpc.netty.shaded.io.grpc.netty.NettyServerBuilder
 import redsort.jobs.messages._
 import com.google.protobuf.empty.Empty
+import cats.effect.std.Queue
+import redsort.jobs.context.SchedulerCtx
+import redsort.jobs.context.interface.SchedulerRpcServer
+import redsort.jobs.Common._
+import redsort.jobs.scheduler
 
 object SchedulerRpcService {
-  def init(state: Ref[IO, SharedState]): SchedulerFs2Grpc[IO, Metadata] =
+  def init(
+      stateR: Ref[IO, SharedState],
+      schedulerFiberQueue: Queue[IO, SchedulerFiberEvents],
+      ctx: SchedulerRpcServer,
+      workerAddrs: Map[Wid, NetAddr]
+  ): SchedulerFs2Grpc[IO, Metadata] =
     new SchedulerFs2Grpc[IO, Metadata] {
-      override def haltOnError(request: JobSystemError, ctx: Metadata): IO[Empty] =
-        IO.pure(new Empty())
+      override def haltOnError(req: HaltRequest, meta: Metadata): IO[Empty] = for {
+        _ <- schedulerFiberQueue.offer(
+          new SchedulerFiberEvents.Halt(req.err, Wid.fromMsg(req.source))
+        )
+      } yield new Empty()
 
-      override def notifyUp(request: Empty, ctx: Metadata): IO[Empty] = ???
+      override def notifyUp(request: Empty, meta: Metadata): IO[Empty] = IO.pure(new Empty())
 
-      override def registerWorker(request: WorkerHello, ctx: Metadata): IO[SchedulerHello] = ???
+      override def registerWorker(hello: WorkerHello, meta: Metadata): IO[SchedulerHello] = for {
+        _ <- schedulerFiberQueue.offer(new SchedulerFiberEvents.WorkerRegistration(hello))
+      } yield {
+        val ip = meta.get(CLIENT_IP_METADATA_KEY)
+        val mid = workerAddrs.find(_._2.ip == ip).get._1.mid
+        new SchedulerHello(
+          mid = mid
+        )
+      }
     }
+
+  val CLIENT_IP_METADATA_KEY = Metadata.Key.of("client-ip", Metadata.ASCII_STRING_MARSHALLER)
 }
 
 object RpcServerFiber {
-  private def grpcService(state: Ref[IO, SharedState]): Resource[IO, ServerServiceDefinition] =
-    SchedulerFs2Grpc.bindServiceResource[IO](SchedulerRpcService.init(state))
-
-  def start(state: Ref[IO, SharedState]): Resource[IO, Server] =
-    grpcService(state)
-      .flatMap(service =>
-        NettyServerBuilder
-          .forPort(5000)
-          .addService(service)
-          .resource[IO]
+  def start(
+      port: Int,
+      stateR: Ref[IO, SharedState],
+      schedulerFiberQueue: Queue[IO, SchedulerFiberEvents],
+      ctx: SchedulerRpcServer,
+      workerAddrs: Map[Wid, NetAddr]
+  ): Resource[IO, Server] =
+    ctx
+      .schedulerRpcServer(
+        SchedulerRpcService.init(stateR, schedulerFiberQueue, ctx, workerAddrs),
+        5000
       )
       .evalMap(server => IO(server.start()))
 }

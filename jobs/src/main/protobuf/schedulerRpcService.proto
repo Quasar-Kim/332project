@@ -4,19 +4,27 @@ package redsort.jobs.messages;
 
 import "storage.proto";
 import "error.proto";
+import "common.proto";
+import "scalapb/scalapb.proto";
 import "google/protobuf/empty.proto";
 
 service Scheduler {
   rpc RegisterWorker (WorkerHello) returns (SchedulerHello);
   rpc NotifyUp (google.protobuf.Empty) returns (google.protobuf.Empty);
-  rpc HaltOnError(JobSystemError) returns (google.protobuf.Empty);
+  rpc HaltOnError(HaltRequest) returns (google.protobuf.Empty);
 }
 
 message WorkerHello {
   int32 wtid = 1;
   optional LocalStorageInfo storageInfo = 2;
+  string ip = 3;
 }
 
 message SchedulerHello {
   int32 mid = 1;
+}
+
+message HaltRequest {
+  WidMsg source = 1 [(scalapb.field).no_box = true];
+  JobSystemError err = 2 [(scalapb.field).no_box = true];
 }

@@ -20,7 +20,11 @@ object Scheduler {
         for {
           stateR <- SharedState.init(workerAddrs)
           _ <- (
-            supervisor.supervise(RpcServerFiber.start(stateR).useForever),
+            // TODO: we need mechanism to allocate port numbers without overlapping one
+            // to allow local testing
+            supervisor.supervise(
+              RpcServerFiber.start(5000, stateR, schedulerFiberQueue, ctx, workerAddrs).useForever
+            ),
             supervisor.supervise(SchedulerFiber.start(stateR).useForever),
             workerAddrs.keys.toList.parTraverse_ { wid =>
               supervisor.supervise(
