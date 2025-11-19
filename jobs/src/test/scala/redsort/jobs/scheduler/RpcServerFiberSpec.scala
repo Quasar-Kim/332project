@@ -64,28 +64,32 @@ class RpcServerFiberSpec extends FlatSpecBase {
   it should "enqueue WorkerHello to input queue of scheduler fiber" in {
     val f = fixture
 
-    f.grpc.use { case (grpc, schedulerFiberQueue) =>
-      for {
-        _ <- grpc.registerWorker(f.workerHello, f.metadata)
-        event <- schedulerFiberQueue.take
-      } yield {
-        inside(event) { case SchedulerFiberEvents.WorkerRegistration(hello) =>
-          hello should equal(f.workerHello)
+    f.grpc
+      .use { case (grpc, schedulerFiberQueue) =>
+        for {
+          _ <- grpc.registerWorker(f.workerHello, f.metadata)
+          event <- schedulerFiberQueue.take
+        } yield {
+          inside(event) { case SchedulerFiberEvents.WorkerRegistration(hello) =>
+            hello should equal(f.workerHello)
+          }
         }
       }
-    }
+      .timeout(1.seconds)
   }
 
   it should "reply with SchedulerHello" in {
     val f = fixture
 
-    f.grpc.use { case (grpc, schedulerFiberQueue) =>
-      for {
-        schedulerHello <- grpc.registerWorker(f.workerHello, f.metadata)
-      } yield {
-        schedulerHello.mid should equal(f.wid.mid)
+    f.grpc
+      .use { case (grpc, schedulerFiberQueue) =>
+        for {
+          schedulerHello <- grpc.registerWorker(f.workerHello, f.metadata)
+        } yield {
+          schedulerHello.mid should equal(f.wid.mid)
+        }
       }
-    }
+      .timeout(1.seconds)
   }
 
   // this test case is required only for fault tolerance and not implemented for now
