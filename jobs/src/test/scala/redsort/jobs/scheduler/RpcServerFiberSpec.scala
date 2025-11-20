@@ -70,8 +70,9 @@ class RpcServerFiberSpec extends FlatSpecBase {
           _ <- grpc.registerWorker(f.workerHello, f.metadata)
           event <- schedulerFiberQueue.take
         } yield {
-          inside(event) { case SchedulerFiberEvents.WorkerRegistration(hello) =>
+          inside(event) { case SchedulerFiberEvents.WorkerRegistration(hello, from) =>
             hello should equal(f.workerHello)
+            from should equal(f.wid)
           }
         }
       }

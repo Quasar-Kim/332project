@@ -31,11 +31,14 @@ object SchedulerRpcService {
       override def notifyUp(request: Empty, meta: Metadata): IO[Empty] = IO.pure(new Empty())
 
       override def registerWorker(hello: WorkerHello, meta: Metadata): IO[SchedulerHello] = for {
-        _ <- schedulerFiberQueue.offer(new SchedulerFiberEvents.WorkerRegistration(hello))
+        wid <- IO.pure({
+          val mid = workerAddrs.find(_._2.ip == hello.ip).get._1.mid
+          new Wid(mid, hello.wtid)
+        })
+        _ <- schedulerFiberQueue.offer(new SchedulerFiberEvents.WorkerRegistration(hello, wid))
       } yield {
-        val mid = workerAddrs.find(_._2.ip == hello.ip).get._1.mid
         new SchedulerHello(
-          mid = mid
+          mid = wid.mid
         )
       }
     }
