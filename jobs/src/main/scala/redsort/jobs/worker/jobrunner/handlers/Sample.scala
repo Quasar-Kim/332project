@@ -7,14 +7,15 @@ import redsort.jobs.Common._
 import redsort.jobs.messages._
 
 import scala.concurrent.duration._
+import redsort.jobs.worker.filestorage.{FileStorage, AppContext}
 
-object JobSampler {
+class JobSampler(fileStorage: FileStorage[AppContext]) {
   def run(job: JobSpecMsg): IO[JobResult] = {
     for {
       _ <- IO.println(s"[Sampling] Sampling job ${job.name} is started")
       // TODO
       _ <- IO.sleep(10.second)
-      - <- IO.println(s"[Sampling] Sampling job ${job.name} is done")
+      _ <- IO.println(s"[Sampling] Sampling job ${job.name} is done")
     } yield JobResult(
       success = true
       // TODO

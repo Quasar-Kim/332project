@@ -13,11 +13,16 @@ import redsort.jobs.messages._
 import com.google.protobuf.empty.Empty
 
 import redsort.jobs.worker.jobrunner._
+import redsort.jobs.worker.filestorage.{FileStorage, AppContext}
 
-class WorkerRpcService(isBusy: Ref[IO, Boolean]) extends WorkerFs2Grpc[IO, Metadata] {
+class WorkerRpcService(isBusy: Ref[IO, Boolean], fileStorage: FileStorage[AppContext])
+    extends WorkerFs2Grpc[IO, Metadata] {
   val jobRunner = new JobRunner(
     Map(
-      JobType.SAMPLING -> JobSampler.run
+      JobType.SAMPLING -> new JobSampler(fileStorage).run,
+      JobType.SORTING -> new JobSorter(fileStorage).run,
+      JobType.PARTITIONING -> new JobPartitioner(fileStorage).run,
+      JobType.MERGING -> new JobMerger(fileStorage).run
     )
   )
 
@@ -53,10 +58,11 @@ class WorkerRpcService(isBusy: Ref[IO, Boolean]) extends WorkerFs2Grpc[IO, Metad
 }
 
 object WorkerServerFiber {
-  def start(port: Int): IO[Unit] = {
+  def start(port: Int, ctx: AppContext = AppContext.Production): IO[Unit] = {
     for {
       busyFlag <- Ref.of[IO, Boolean](false)
-      serviceDefinition = new WorkerRpcService(busyFlag)
+      fileStorage <- FileStorage.create(ctx)
+      serviceDefinition = new WorkerRpcService(busyFlag, fileStorage)
       _ <- WorkerFs2Grpc
         .bindServiceResource[IO](serviceDefinition)
         .use { service =>
