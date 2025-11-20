@@ -4,10 +4,19 @@ import "google/protobuf/any.proto";
 import "storage.proto";
 
 package redsort.jobs.messages;
+
+enum JobType {
+  SAMPLING = 0;
+  SORTING = 1;
+  PARTITIONING = 2;
+  MERGING = 3;
+}
+
 message JobSpecMsg {
   string name = 1;
-  repeated google.protobuf.Any args = 2;
-  repeated FileEntryMsg inputs = 3;
-  repeated FileEntryMsg outputs = 4;
-  int32 outputSize = 5;
+  JobType jobType = 2;
+  repeated google.protobuf.Any args = 3;
+  repeated FileEntryMsg inputs = 4;
+  repeated FileEntryMsg outputs = 5;
+  int32 outputSize = 6;
 }
