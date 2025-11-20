@@ -10,6 +10,10 @@ object Dependencies {
     val grpcNetty = "io.grpc" % "grpc-netty-shaded" % scalapb.compiler.Version.grpcJavaVersion
     val scalapbRuntime = "com.thesamet.scalapb" %% "scalapb-runtime" % scalapb.compiler.Version.scalapbVersion % "protobuf"
 
+    // fileIO
+    val fs2core = "co.fs2" %% "fs2-core" % "3.12.0"
+    val fs2io = "co.fs2" %% "fs2-io" % "3.12.0"
+
     // -- testing deps
     val scalaTest = "org.scalatest" %% "scalatest" % "3.2.19" % "test"
     val scalactic = "org.scalactic" %% "scalactic" % "3.2.19"
@@ -28,5 +32,7 @@ object Dependencies {
         scalamockCatsEffect,
         catsEffectTestingScalaTest,
         scalapbRuntime,
+        fs2core,
+        fs2io
     )
 }
