@@ -6,9 +6,11 @@ import cats.syntax._
 import redsort.jobs.Common._
 import scala.concurrent.duration._
 
+// TODO(jaehwan)
 object WorkerClientFiber {
   def start(wid: Int, masterIP: String, masterPort: Int): IO[Unit] = for {
-    _ <- IO.println(s"[WorkerClientFiber] hello from rpc client $wid")
+    // _ <- IO.println(s"[WorkerClientFiber] hello from rpc client $wid")
+    // TODO:
     _ <- IO.sleep(20.second)
     _ <- start(wid, masterIP, masterPort)
   } yield ()

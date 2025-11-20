@@ -15,19 +15,14 @@ import com.google.protobuf.empty.Empty
 import redsort.jobs.worker.jobrunner._
 import redsort.jobs.worker.filestorage.{FileStorage, AppContext}
 
-class WorkerRpcService(isBusy: Ref[IO, Boolean], fileStorage: FileStorage[AppContext])
-    extends WorkerFs2Grpc[IO, Metadata] {
-  val jobRunner = new JobRunner(
-    Map(
-      JobType.SAMPLING -> new JobSampler(fileStorage).run,
-      JobType.SORTING -> new JobSorter(fileStorage).run,
-      JobType.PARTITIONING -> new JobPartitioner(fileStorage).run,
-      JobType.MERGING -> new JobMerger(fileStorage).run
-    )
-  )
-
+class WorkerRpcService(
+    isBusy: Ref[IO, Boolean],
+    handlerMap: Map[String, JobSpecMsg => IO[JobResult]],
+    fileStorage: FileStorage[AppContext]
+) extends WorkerFs2Grpc[IO, Metadata] {
+  private val jobRunner = new JobRunner(handlerMap)
   override def runJob(request: JobSpecMsg, ctx: Metadata): IO[JobResult] = {
-    println(s"[WorkerRpcService] Received job of type ${request.jobType}")
+    println(s"[WorkerRpcService] Received job of type ${request.name}")
     isBusy
       .modify {
         case true  => (true, false)
@@ -69,11 +64,15 @@ class WorkerRpcService(isBusy: Ref[IO, Boolean], fileStorage: FileStorage[AppCon
 }
 
 object WorkerServerFiber {
-  def start(port: Int, ctx: AppContext = AppContext.Production): IO[Unit] = {
+  def start(
+      port: Int,
+      handlerMap: Map[String, JobSpecMsg => IO[JobResult]],
+      ctx: AppContext = AppContext.Production
+  ): IO[Unit] = {
     for {
       busyFlag <- Ref.of[IO, Boolean](false)
       fileStorage <- FileStorage.create(ctx)
-      serviceDefinition = new WorkerRpcService(busyFlag, fileStorage)
+      serviceDefinition = new WorkerRpcService(busyFlag, handlerMap, fileStorage)
       _ <- WorkerFs2Grpc
         .bindServiceResource[IO](serviceDefinition)
         .use { service =>

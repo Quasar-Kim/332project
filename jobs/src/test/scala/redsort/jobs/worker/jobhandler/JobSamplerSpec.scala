@@ -37,8 +37,7 @@ class JobSamplerSpec extends AsyncFlatSpec with AsyncIOSpec with Matchers {
       val jobSpec = JobSpecMsg(
         name = "test-sampling",
         inputs = Seq(FileEntryMsg(path = inputPath)),
-        outputs = Seq(FileEntryMsg(path = outputPath)),
-        jobType = JobType.SAMPLING
+        outputs = Seq(FileEntryMsg(path = outputPath))
       )
       val sampler = new JobSampler(storage)
 

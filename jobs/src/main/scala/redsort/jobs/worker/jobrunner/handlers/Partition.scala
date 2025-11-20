@@ -19,7 +19,6 @@ class JobPartitioner(fileStorage: FileStorage[AppContext]) {
     } yield JobResult(
       success = true
       // TODO
-      // message = s"Sampled job of type ${job.jobType}"
     )
   }
 }

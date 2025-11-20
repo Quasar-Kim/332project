@@ -8,14 +8,14 @@ import redsort.jobs.messages._
 
 import redsort.jobs.worker.jobrunner._
 
-class JobRunner(handlers: Map[JobType, JobSpecMsg => IO[JobResult]]) {
+class JobRunner(handlers: Map[String, JobSpecMsg => IO[JobResult]]) {
   def runJob(job: JobSpecMsg): IO[JobResult] = {
-    handlers.get(job.jobType) match {
+    handlers.get(job.name) match {
       case Some(jobFunc) =>
         jobFunc(job).handleErrorWith { e =>
           for {
             _ <- IO.println(
-              s"[JobRunner] Error while processing job type ${job.jobType}: ${e.getMessage}"
+              s"[JobRunner] Error while processing job type ${job.name}: ${e.getMessage}"
             )
           } yield JobResult(
             success = false,
@@ -36,7 +36,7 @@ class JobRunner(handlers: Map[JobType, JobSpecMsg => IO[JobResult]]) {
 
       case None =>
         for {
-          _ <- IO.println(s"[JobRunner] No handler found for job type ${job.jobType}")
+          _ <- IO.println(s"[JobRunner] No handler found for job type ${job.name}")
         } yield JobResult(
           success = false,
           retval = None,
@@ -45,7 +45,7 @@ class JobRunner(handlers: Map[JobType, JobSpecMsg => IO[JobResult]]) {
               kind = WorkerErrorKind.BODY_ERROR,
               inner = Some(
                 JobSystemError(
-                  message = s"No handler found for job type ${job.jobType}"
+                  message = s"No handler found for job type ${job.name}"
                 )
               )
             )

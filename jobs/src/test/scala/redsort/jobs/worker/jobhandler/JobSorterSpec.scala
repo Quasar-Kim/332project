@@ -37,8 +37,7 @@ class JobSorterSpec extends AsyncFlatSpec with AsyncIOSpec with Matchers {
       val jobSpec = JobSpecMsg(
         name = "test-sorting",
         inputs = Seq(FileEntryMsg(path = inputPath)),
-        outputs = Seq(FileEntryMsg(path = outputPath)),
-        jobType = JobType.SORTING
+        outputs = Seq(FileEntryMsg(path = outputPath))
       )
       val sorter = new JobSorter(storage)
 
