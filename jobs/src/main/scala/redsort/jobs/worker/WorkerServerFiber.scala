@@ -67,11 +67,10 @@ object WorkerServerFiber {
   def start(
       port: Int,
       handlerMap: Map[String, JobSpecMsg => IO[JobResult]],
-      ctx: AppContext = AppContext.Production
+      fileStorage: FileStorage[AppContext]
   ): IO[Unit] = {
     for {
       busyFlag <- Ref.of[IO, Boolean](false)
-      fileStorage <- FileStorage.create(ctx)
       serviceDefinition = new WorkerRpcService(busyFlag, handlerMap, fileStorage)
       _ <- WorkerFs2Grpc
         .bindServiceResource[IO](serviceDefinition)
