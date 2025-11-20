@@ -41,8 +41,19 @@ class WorkerRpcService(isBusy: Ref[IO, Boolean], fileStorage: FileStorage[AppCon
         } else {
           IO.pure(
             JobResult(
-              success = false
-              // TODO
+              success = false,
+              retval = None,
+              error = Some(
+                WorkerError(
+                  kind = WorkerErrorKind.WORKER_BUSY,
+                  inner = Some(
+                    JobSystemError(
+                      message = s"Worker is currently busy processing another job."
+                    )
+                  )
+                )
+              ),
+              stats = None
             )
           )
         }

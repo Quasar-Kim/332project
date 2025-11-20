@@ -18,9 +18,19 @@ class JobRunner(handlers: Map[JobType, JobSpecMsg => IO[JobResult]]) {
               s"[JobRunner] Error while processing job type ${job.jobType}: ${e.getMessage}"
             )
           } yield JobResult(
-            success = false
-            // TODO
-            // message = s"Job failed with error: ${e.getMessage}"
+            success = false,
+            retval = None,
+            error = Some(
+              WorkerError(
+                kind = WorkerErrorKind.BODY_ERROR,
+                inner = Some(
+                  JobSystemError(
+                    message = s"Job failed with error: ${e.getMessage}"
+                  )
+                )
+              )
+            ),
+            stats = None
           )
         }
 
@@ -28,9 +38,19 @@ class JobRunner(handlers: Map[JobType, JobSpecMsg => IO[JobResult]]) {
         for {
           _ <- IO.println(s"[JobRunner] No handler found for job type ${job.jobType}")
         } yield JobResult(
-          success = false
-          // TODO
-          // message = s"No handler found for job type ${job.jobType}"
+          success = false,
+          retval = None,
+          error = Some(
+            WorkerError(
+              kind = WorkerErrorKind.BODY_ERROR,
+              inner = Some(
+                JobSystemError(
+                  message = s"No handler found for job type ${job.jobType}"
+                )
+              )
+            )
+          ),
+          stats = None
         )
     }
   }
