@@ -13,6 +13,8 @@ import redsort.jobs.messages.WorkerHello
 import redsort.jobs.JobSystemException
 import redsort.jobs.messages.JobSystemError
 import monocle.syntax.all._
+import redsort.jobs.messages.JobResult
+import redsort.jobs.Unreachable
 
 class SchedulerFiberSpec extends FlatSpecBase {
   def fixture = new {
@@ -33,19 +35,20 @@ class SchedulerFiberSpec extends FlatSpecBase {
           workerStates: Map[Wid, WorkerState],
           specs: Seq[JobSpec]
       ): IO[Map[Wid, WorkerState]] = {
-        val updatedStates = for {
-          ((wid, state), i) <- workerStates.zipWithIndex
-        } yield {
-          val job = new Job(
-            state = JobState.Pending,
-            ttl = 0,
-            spec = specs(i)
-          )
-          val updatedState =
-            state.focus(_.pendingJobs).modify(q => q.enqueue(job))
-          (wid, updatedState)
+        // schedule each job to Wid((i / 2) % 2, i % 2)
+        val updatedWorkerStates = specs.zipWithIndex.foldLeft(workerStates) {
+          case (acc, (spec, i)) =>
+            val wid = new Wid((i / 2) % 2, i % 2)
+            val job = new Job(
+              state = JobState.Pending,
+              ttl = 0,
+              spec = spec,
+              result = None
+            )
+            val updatedWorkerState = acc(wid).focus(_.pendingJobs).modify(q => q.enqueue(job))
+            acc.updated(wid, updatedWorkerState)
         }
-        IO.pure(updatedStates.toMap)
+        IO.pure(updatedWorkerStates)
       }
 
       override def evaluate(spec: JobSpec, wid: Wid, workerState: WorkerState): ScheduleEvaluation =
@@ -123,11 +126,16 @@ class SchedulerFiberSpec extends FlatSpecBase {
 
   val wid = new Wid(1, 0)
 
+  val jobSpecA = new JobSpec(name = "a", args = Seq(), inputs = Seq(), outputs = Seq())
+  val jobSpecB = new JobSpec(name = "b", args = Seq(), inputs = Seq(), outputs = Seq())
+  val jobSpecC = new JobSpec(name = "c", args = Seq(), inputs = Seq(), outputs = Seq())
+  val jobSpecD = new JobSpec(name = "d", args = Seq(), inputs = Seq(), outputs = Seq())
+  val jobSpecE = new JobSpec(name = "e", args = Seq(), inputs = Seq(), outputs = Seq())
   val jobSpecs = Seq(
-    new JobSpec(name = "a", args = Seq(), inputs = Seq(), outputs = Seq()),
-    new JobSpec(name = "b", args = Seq(), inputs = Seq(), outputs = Seq()),
-    new JobSpec(name = "c", args = Seq(), inputs = Seq(), outputs = Seq()),
-    new JobSpec(name = "d", args = Seq(), inputs = Seq(), outputs = Seq())
+    jobSpecA,
+    jobSpecB,
+    jobSpecC,
+    jobSpecD
   )
 
   behavior of "SchedulerFiber (upon receiving WorkerRegistration)"
@@ -273,9 +281,100 @@ class SchedulerFiberSpec extends FlatSpecBase {
 
   behavior of "SchedulerFiber (upon receiving JobCompleted)"
 
-  it should "run another job if there are remaining jobs"
+  it should "run another job if there are remaining jobs" in {
+    val f = fixture
+    val result = new JobResult(
+      success = true,
+      retval = None,
+      error = None,
+      stats = None
+    )
+    val wid = new Wid(0, 0)
 
-  it should "return job specs to caller and change state to Idle if all jobs are completed"
+    f.startSchedulerFiber
+      .use { case (stateR, mainFiberQueue, schedulerFiberQueue, rpcClientFiberQueues) =>
+        for {
+          _ <- f.initAll(stateR, mainFiberQueue, schedulerFiberQueue)
+
+          // schedule four + one jobs, each scheduled to each workers
+          _ <- schedulerFiberQueue.offer(new SchedulerFiberEvents.Jobs(jobSpecs :+ jobSpecE))
+          a <- rpcClientFiberQueues(new Wid(0, 0)).take
+          b <- rpcClientFiberQueues(new Wid(0, 1)).take
+          c <- rpcClientFiberQueues(new Wid(1, 0)).take
+          d <- rpcClientFiberQueues(new Wid(1, 1)).take
+
+          // enqueue JobCompleted event
+          _ <- schedulerFiberQueue.offer(new SchedulerFiberEvents.JobCompleted(result, wid))
+
+          // now another job will be enqueued to worker 0,0
+          evt <- rpcClientFiberQueues(wid).take
+
+          // sleep briefly to allow shared states to be updated
+          _ <- IO.sleep(100.millis)
+          state <- stateR.get
+        } yield {
+          evt match {
+            case WorkerFiberEvents.Job(s) => s should be(jobSpecE)
+            case _                        => fail("evt is not Job")
+          }
+          val completedJob = state.schedulerFiber.workers(wid).completedJobs.dequeue._1
+          completedJob.spec should be(jobSpecA)
+          completedJob.state should be(JobState.Completed)
+        }
+      }
+      .timeout(1.second)
+  }
+
+  it should "return job specs to caller and change state to Idle if all jobs are completed" in {
+    val f = fixture
+    val jobResult = new JobResult(
+      success = true,
+      retval = None,
+      error = None,
+      stats = None
+    )
+    val wid = new Wid(0, 0)
+
+    f.startSchedulerFiber
+      .use { case (stateR, mainFiberQueue, schedulerFiberQueue, rpcClientFiberQueues) =>
+        for {
+          _ <- f.initAll(stateR, mainFiberQueue, schedulerFiberQueue)
+          _ <- schedulerFiberQueue.offer(new SchedulerFiberEvents.Jobs(jobSpecs))
+          _ <- rpcClientFiberQueues(new Wid(0, 0)).take
+          _ <- rpcClientFiberQueues(new Wid(0, 1)).take
+          _ <- rpcClientFiberQueues(new Wid(1, 0)).take
+          _ <- rpcClientFiberQueues(new Wid(1, 1)).take
+
+          // enqueue JobCompleted event
+          _ <- schedulerFiberQueue.tryOfferN(
+            List(
+              new SchedulerFiberEvents.JobCompleted(jobResult, new Wid(0, 0)),
+              new SchedulerFiberEvents.JobCompleted(jobResult, new Wid(0, 1)),
+              new SchedulerFiberEvents.JobCompleted(jobResult, new Wid(1, 0)),
+              new SchedulerFiberEvents.JobCompleted(jobResult, new Wid(1, 1))
+            )
+          )
+
+          // wait for job completion event
+          result <- mainFiberQueue.take
+        } yield {
+          result match {
+            case MainFiberEvents.JobCompleted(results) => {
+              results should be(
+                Seq(
+                  (jobSpecA, jobResult),
+                  (jobSpecB, jobResult),
+                  (jobSpecC, jobResult),
+                  (jobSpecD, jobResult)
+                )
+              )
+            }
+            case _ => fail("result is not JobCompleted")
+          }
+        }
+      }
+      .timeout(1.second)
+  }
 
   behavior of "SchedulerFiber (upon receiving JobFailed)"
 

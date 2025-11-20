@@ -95,7 +95,7 @@ final case class WorkerState(
     netAddr: NetAddr,
     status: WorkerStatus,
     pendingJobs: Queue[Job],
-    runningJobs: Option[Job],
+    runningJob: Option[Job],
     completedJobs: Queue[Job],
     initialized: Boolean
 )
@@ -106,7 +106,7 @@ object WorkerState {
     netAddr = netAddr,
     status = WorkerStatus.Down,
     pendingJobs = Queue(),
-    runningJobs = None,
+    runningJob = None,
     completedJobs = Queue(),
     initialized = false
   )
@@ -132,7 +132,8 @@ object WorkerStatus {
 final case class Job(
     state: JobState,
     ttl: Int,
-    spec: JobSpec
+    spec: JobSpec,
+    result: Option[msg.JobResult]
 )
 
 /** Job state, either pending, running, or completed.
@@ -243,6 +244,7 @@ object WorkerFiberEvents {
 sealed abstract class MainFiberEvents
 object MainFiberEvents {
   final case object Initialized extends MainFiberEvents
-  final case object JobCompleted extends MainFiberEvents
+  final case class JobCompleted(results: Seq[Tuple2[JobSpec, msg.JobResult]])
+      extends MainFiberEvents
   final case class JobFailed(error: Throwable) extends MainFiberEvents
 }

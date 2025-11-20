@@ -13,6 +13,8 @@ import redsort.jobs.JobSystemException
 import redsort.jobs.scheduler.SchedulerFiberEvents.FatalError
 import redsort.jobs.scheduler.SchedulerFiberEvents.Jobs
 import redsort.jobs.Unreachable
+import redsort.jobs.scheduler.SchedulerFiberEvents.JobCompleted
+import redsort.jobs.messages.JobResult
 
 object SchedulerFiber {
   def start(
@@ -82,27 +84,30 @@ object SchedulerFiber {
       } yield ()
 
     case Halt(errMsg, from) =>
-      mainFiberQueue.offer(
-        new MainFiberEvents.JobFailed(JobSystemException.fromMsg(errMsg, from.toString()))
-      )
+      for {
+        exception <- IO.pure(JobSystemException.fromMsg(errMsg, from.toString()))
+        _ <- mainFiberQueue.offer(
+          new MainFiberEvents.JobFailed(exception)
+        )
+      } yield ()
 
     case FatalError(error) =>
-      mainFiberQueue.offer(
-        new MainFiberEvents.JobFailed(error)
-      )
+      for {
+        _ <- mainFiberQueue.offer(
+          new MainFiberEvents.JobFailed(error)
+        )
+      } yield ()
 
     case Jobs(specs) =>
       stateR.get.flatMap { state =>
         if (state.schedulerFiber.state != SchedulerState.Idle) {
-          for {
-            _ <- mainFiberQueue.offer(
-              new MainFiberEvents.JobFailed(
-                new IllegalStateException(
-                  s"Scheduler cannot accept jobs in state other than `Idle`. Current state: ${state.schedulerFiber.state}"
-                )
+          mainFiberQueue.offer(
+            new MainFiberEvents.JobFailed(
+              new IllegalStateException(
+                s"Scheduler cannot accept jobs in state other than `Idle`. Current state: ${state.schedulerFiber.state}"
               )
             )
-          } yield ()
+          )
         } else {
           for {
             // change state to Running.
@@ -124,6 +129,73 @@ object SchedulerFiber {
         }
       }
 
+    case JobCompleted(result, from) =>
+      stateR.get.flatMap { state =>
+        if (state.schedulerFiber.state != SchedulerState.Running) {
+          mainFiberQueue.offer(
+            new MainFiberEvents.JobFailed(
+              new IllegalStateException(
+                s"Scheduler got `JobCompleted` event which is only valid in state `Runninig`. Current state: ${state.schedulerFiber.state}"
+              )
+            )
+          )
+        } else {
+          for {
+            // move running job to completed job
+            updatedState <- IO.pure({
+              val workerState = state.schedulerFiber.workers(from)
+              workerState.runningJob match {
+                case Some(job) => {
+                  val updatedJob = job
+                    .focus(_.state)
+                    .replace(JobState.Completed)
+                    .focus(_.result)
+                    .replace(Some(result))
+                  val updatedWorkerState = workerState
+                    .focus(_.runningJob)
+                    .replace(None)
+                    .focus(_.completedJobs)
+                    .modify { q => q.enqueue(updatedJob) }
+                  state.focus(_.schedulerFiber.workers).at(from).replace(Some(updatedWorkerState))
+                }
+                case None => throw new Unreachable
+              }
+            })
+
+            // if all jobs are completed, send JobCompleted event to main fiber.
+            // otherwise submit another job into workers.
+            done <- IO.pure(updatedState.schedulerFiber.workers.forall { case (_, state) =>
+              state.pendingJobs.isEmpty && state.runningJob.isEmpty
+            })
+            _ <-
+              if (done) {
+                for {
+                  _ <- mainFiberQueue.offer(
+                    new MainFiberEvents.JobCompleted(
+                      jobResults(updatedState.schedulerFiber.workers)
+                    )
+                  )
+                  _ <- stateR.set(
+                    updatedState
+                      .focus(_.schedulerFiber.state)
+                      .replace(SchedulerState.Idle)
+                  )
+                } yield ()
+              } else {
+                for {
+                  workerStates <- submitJob(
+                    updatedState.schedulerFiber.workers,
+                    rpcClientFiberQueues
+                  )
+                  _ <- stateR.set(
+                    updatedState.focus(_.schedulerFiber.workers).replace(workerStates)
+                  )
+                } yield ()
+              }
+          } yield ()
+        }
+      }
+
     case _ => IO.raiseError(new NotImplementedError)
   }
 
@@ -132,7 +204,7 @@ object SchedulerFiber {
       rpcClientFiberQueues: Map[Wid, Queue[IO, WorkerFiberEvents]]
   ): IO[Map[Wid, WorkerState]] = {
     val candidates = workerStates.filter { case (_, state) =>
-      state.runningJobs.isEmpty && !state.pendingJobs.isEmpty && state.status == WorkerStatus.Up
+      state.runningJob.isEmpty && !state.pendingJobs.isEmpty && state.status == WorkerStatus.Up
     }
 
     candidates.toList
@@ -142,7 +214,7 @@ object SchedulerFiber {
         val (job, updatedPendingJobs) = state.pendingJobs.dequeue
         val updatedJob = job.focus(_.state).replace(JobState.Running)
         val updatedStates = state
-          .focus(_.runningJobs)
+          .focus(_.runningJob)
           .replace(Some(updatedJob))
           .focus(_.pendingJobs)
           .replace(updatedPendingJobs)
@@ -157,4 +229,9 @@ object SchedulerFiber {
         workerStates ++ workerStatesUpdates
       }
   }
+
+  def jobResults(workerStates: Map[Wid, WorkerState]): Seq[Tuple2[JobSpec, JobResult]] =
+    workerStates.foldLeft(Seq[Tuple2[JobSpec, JobResult]]()) { case (acc, (_, state)) =>
+      acc ++ state.completedJobs.toSeq.map(job => (job.spec, job.result.get))
+    }
 }
