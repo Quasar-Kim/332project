@@ -60,7 +60,7 @@ final case class SchedulerFiberState(
 
 object SchedulerFiberState {
   def init(workers: Map[Wid, NetAddr]) = new SchedulerFiberState(
-    state = SchedulerState.Idle,
+    state = SchedulerState.Initializing,
     workers = workers.map { case (wid, netAddr) => (wid, WorkerState.init(wid, netAddr)) },
     files = Map()
   )
@@ -70,9 +70,9 @@ object SchedulerFiberState {
   */
 sealed abstract class SchedulerState
 object SchedulerState {
+  final case object Initializing extends SchedulerState
   final case object Idle extends SchedulerState
   final case object Running extends SchedulerState
-  final case object Synchronizing extends SchedulerState
 }
 
 /** State associated to each workers.
@@ -96,7 +96,8 @@ final case class WorkerState(
     status: WorkerStatus,
     pendingJobs: Queue[Job],
     runningJobs: Option[Job],
-    completedJobs: Queue[Job]
+    completedJobs: Queue[Job],
+    initialized: Boolean
 )
 
 object WorkerState {
@@ -106,7 +107,8 @@ object WorkerState {
     status = WorkerStatus.Down,
     pendingJobs = Queue(),
     runningJobs = None,
-    completedJobs = Queue()
+    completedJobs = Queue(),
+    initialized = false
   )
 }
 
@@ -159,8 +161,7 @@ final case class JobSpec(
     name: String,
     args: Seq[Any],
     inputs: Seq[FileEntry],
-    outputs: Seq[FileEntry],
-    outputSize: Int
+    outputs: Seq[FileEntry]
 )
 object JobSpec {
   def toMsg(spec: JobSpec): msg.JobSpecMsg =
@@ -169,8 +170,7 @@ object JobSpec {
       // XXX: how to convert Any to protobuf Any?
       args = Seq(),
       inputs = spec.inputs.map(FileEntry.toMsg),
-      outputs = spec.outputs.map(FileEntry.toMsg),
-      outputSize = spec.outputSize
+      outputs = spec.outputs.map(FileEntry.toMsg)
     )
 
   def fromMsg(m: msg.JobSpecMsg): JobSpec =
@@ -178,8 +178,7 @@ object JobSpec {
       name = m.name,
       args = m.args,
       inputs = m.inputs.map(FileEntry.fromMsg),
-      outputs = m.outputs.map(FileEntry.fromMsg),
-      outputSize = m.outputSize
+      outputs = m.outputs.map(FileEntry.fromMsg)
     )
 }
 
@@ -204,13 +203,14 @@ object SchedulerFiberEvents {
     * @param specs
     *   list of job specs.
     */
-  final case class Jobs(specs: List[JobSpec]) extends SchedulerFiberEvents
+  final case class Jobs(specs: Seq[JobSpec]) extends SchedulerFiberEvents
 
   // == sent by RPC server fiber:
 
   /** WorkerHello RPC method has been called with argument `hello`.
     */
-  final case class WorkerRegistration(hello: msg.WorkerHello) extends SchedulerFiberEvents
+  final case class WorkerRegistration(hello: msg.WorkerHello, from: Wid)
+      extends SchedulerFiberEvents
 
   /** Worker did not called Heartbeat RPC method in timeout.
     *
@@ -236,6 +236,13 @@ object SchedulerFiberEvents {
 sealed abstract class WorkerFiberEvents
 object WorkerFiberEvents {
   final case class Job(spec: JobSpec) extends WorkerFiberEvents
-  final case object WorkerDown
-  final case object WorkerUp
+  final case object WorkerDown extends WorkerFiberEvents
+  final case object WorkerUp extends WorkerFiberEvents
+}
+
+sealed abstract class MainFiberEvents
+object MainFiberEvents {
+  final case object Initialized extends MainFiberEvents
+  final case object JobCompleted extends MainFiberEvents
+  final case class JobFailed(error: Throwable) extends MainFiberEvents
 }
