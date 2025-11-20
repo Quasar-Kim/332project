@@ -33,15 +33,12 @@ object SchedulerRpcService {
       override def registerWorker(hello: WorkerHello, meta: Metadata): IO[SchedulerHello] = for {
         _ <- schedulerFiberQueue.offer(new SchedulerFiberEvents.WorkerRegistration(hello))
       } yield {
-        val ip = meta.get(CLIENT_IP_METADATA_KEY)
-        val mid = workerAddrs.find(_._2.ip == ip).get._1.mid
+        val mid = workerAddrs.find(_._2.ip == hello.ip).get._1.mid
         new SchedulerHello(
           mid = mid
         )
       }
     }
-
-  val CLIENT_IP_METADATA_KEY = Metadata.Key.of("client-ip", Metadata.ASCII_STRING_MARSHALLER)
 }
 
 object RpcServerFiber {

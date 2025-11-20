@@ -51,11 +51,11 @@ class RpcServerFiberSpec extends FlatSpecBase {
     )
 
     val metadata = new Metadata()
-    metadata.put(SchedulerRpcService.CLIENT_IP_METADATA_KEY, "1.1.1.2")
     val wid = new Wid(1, 0)
     val workerHello = new WorkerHello(
       wtid = 0,
-      storageInfo = None
+      storageInfo = None,
+      ip = "1.1.1.2"
     )
   }
 
