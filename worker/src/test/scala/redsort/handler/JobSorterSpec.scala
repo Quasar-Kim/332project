@@ -1,4 +1,4 @@
-package redsort.jobs.worker.jobrunner
+package redsort.worker.handlers
 
 import cats.effect._
 import cats.effect.testing.scalatest.AsyncIOSpec
@@ -9,7 +9,7 @@ import redsort.jobs.worker.filestorage._
 import redsort.jobs.messages._
 import java.nio.charset.StandardCharsets
 
-import redsort.jobs.worker.gensort._
+import redsort.worker.gensort._
 
 class JobSorterSpec extends AsyncFlatSpec with AsyncIOSpec with Matchers {
 

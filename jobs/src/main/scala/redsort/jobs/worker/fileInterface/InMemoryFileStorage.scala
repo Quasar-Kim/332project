@@ -33,16 +33,6 @@ class InMemoryFileStorage(ref: Ref[IO, Map[String, Array[Byte]]]) extends FileSt
     ref.get.map(_.contains(path))
   }
   override def rename(before: String, after: String): IO[Unit] = {
-    // Why this code not work?
-    // ref.modify { fs =>
-    //   fs.get(before) match {
-    //     case None => (fs, Left(new FileNotFoundException(s"File not found: $before")))
-    //     case Some(data) => (fs - before + (after -> data), Right(()))
-    //   }.flatMap {
-    //     case Right(_) => IO.Unit
-    //     case Left(_) => IO.raiseError(_)
-    //   }
-    // }
     val action = ref.modify { fs =>
       fs.get(before) match {
         case Some(data) =>

@@ -1,4 +1,4 @@
-package redsort.jobs.worker.jobrunner
+package redsort.worker.handlers
 
 import cats._
 import cats.effect._

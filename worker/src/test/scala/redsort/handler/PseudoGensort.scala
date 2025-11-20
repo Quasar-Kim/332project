@@ -1,4 +1,4 @@
-package redsort.jobs.worker.gensort
+package redsort.worker.gensort
 
 import cats.effect._
 import cats.effect.testing.scalatest.AsyncIOSpec
