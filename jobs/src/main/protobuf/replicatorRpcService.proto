@@ -1,0 +1,50 @@
+syntax = "proto3";
+
+package redosrt.jobs.messages;
+
+import "google/protobuf/empty.proto";
+
+// service for local workers
+service ReplicatorLocalService {
+  rpc Push(PushRequest) returns (ReplicationResult);
+  rpc Pull(PullRequest) returns (ReplicationResult);
+}
+
+// service for remote replicator
+service ReplicatorRemoteService {
+  rpc Read(ReadRequest) returns (stream Packet);
+  rpc Write(stream WriteRequest) returns (google.protobuf.Empty);  
+}
+
+message PushRequest {
+  string path = 1;
+  int32 dst = 2;
+}
+
+message PullRequest {
+  string path = 1;
+  int32 src = 2;
+}
+
+message ReplicationResult {
+  bool success = 1;
+  optional ReplicationErrorKind error = 2;
+  optional ReplicationStats stats = 3;
+}
+
+// TODO
+enum ReplicationErrorKind {
+  UNKNOWN_ERROR = 0;
+}
+
+// TODO
+message ReplicationStats {}
+
+// TODO
+message ReadRequest {}
+
+// TODO
+message WriteRequest {}
+
+// TODO
+message Packet {}
