@@ -14,7 +14,9 @@ import "google/protobuf/empty.proto";
 service Scheduler {
   /* Notify scheduler that worker has been initialized. */
   rpc RegisterWorker (WorkerHello) returns (SchedulerHello);
-  rpc NotifyUp (google.protobuf.Empty) returns (google.protobuf.Empty);
+
+  /* Worker heartbeat method. Each worker must call this method periodically. */
+  rpc NotifyUp (NotifyUpRequest) returns (google.protobuf.Empty);
 
   /* Request scheduler to halt entire system in case of fatal error. */
   rpc HaltOnError(HaltRequest) returns (google.protobuf.Empty);
@@ -30,6 +32,8 @@ message WorkerHello {
      This field, combined with `port` field helps scheduler to identify wid of the worker.
      Worker ID is returned back as a part of response message. */
   string ip = 3;
+  /* Port number of worker RPC service. */
+  int32 port = 4;
 }
 
 message SchedulerHello {
@@ -42,4 +46,9 @@ message HaltRequest {
   JobSystemError err = 2 [(scalapb.field).no_box = true];
 }
 
-\ No newline at end of file
+message NotifyUpRequest {
+  /* machine ID part of sender's worker ID. */
+  int32 mid = 1;
+  /* worker thread ID part of sender's worker ID. */
+  int32 wtid = 2;
+}
