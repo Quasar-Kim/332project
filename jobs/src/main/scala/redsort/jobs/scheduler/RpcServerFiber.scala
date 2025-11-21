@@ -28,7 +28,7 @@ object SchedulerRpcService {
         )
       } yield new Empty()
 
-      override def notifyUp(request: Empty, meta: Metadata): IO[Empty] = IO.pure(new Empty())
+      override def notifyUp(request: NotifyUpRequest, ctx: Metadata): IO[Empty] = ???
 
       override def registerWorker(hello: WorkerHello, meta: Metadata): IO[SchedulerHello] = for {
         wid <- IO.pure(resolveWidFromNetAddr(workerAddrs, new NetAddr(hello.ip, hello.port)))
