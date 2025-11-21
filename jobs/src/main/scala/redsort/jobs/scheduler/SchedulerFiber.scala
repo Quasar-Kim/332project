@@ -104,11 +104,11 @@ object SchedulerFiber {
         // and change state to Idle.
         _ <- IO.whenA(workerStates.forall { case (wid, state) => state.initialized })(
           for {
-            _ <- stateR.update { s =>
+            state <- stateR.updateAndGet { s =>
               s.focus(_.schedulerFiber.state).replace(SchedulerState.Idle)
             }
             _ <- IO(logger.debug("all workers initialized"))
-            _ <- mainFiberQueue.offer(MainFiberEvents.Initialized)
+            _ <- mainFiberQueue.offer(new MainFiberEvents.Initialized(state.schedulerFiber.files))
           } yield ()
         )
       } yield ()
@@ -217,7 +217,8 @@ object SchedulerFiber {
                   updatedState <- IO.pure(updateFileEntries(updatedState))
                   _ <- mainFiberQueue.offer(
                     new MainFiberEvents.JobCompleted(
-                      jobResults(updatedState.schedulerFiber.workers)
+                      jobResults(updatedState.schedulerFiber.workers),
+                      updatedState.schedulerFiber.files
                     )
                   )
                   _ <- stateR.set(

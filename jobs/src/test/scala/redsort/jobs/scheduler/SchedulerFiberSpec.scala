@@ -158,7 +158,7 @@ class SchedulerFiberSpec extends AsyncSpec {
       )
       evt <- mainFiberQueue.take
     } yield {
-      assume(evt == MainFiberEvents.Initialized)
+      assume(evt.isInstanceOf[MainFiberEvents.Initialized])
     }
   }
 
@@ -390,7 +390,7 @@ class SchedulerFiberSpec extends AsyncSpec {
       .timeout(1.second)
   }
 
-  it should "return job specs to caller and change state to Idle if all jobs are completed" in {
+  it should "return job specs and files to caller and change state to Idle if all jobs are completed" in {
     val f = fixture
     val jobResult = new JobResult(
       success = true,
@@ -424,13 +424,41 @@ class SchedulerFiberSpec extends AsyncSpec {
           result <- mainFiberQueue.take
         } yield {
           result match {
-            case MainFiberEvents.JobCompleted(results) => {
+            case MainFiberEvents.JobCompleted(results, files) => {
               results should be(
                 Seq(
                   (jobSpecA, jobResult),
                   (jobSpecB, jobResult),
                   (jobSpecC, jobResult),
                   (jobSpecD, jobResult)
+                )
+              )
+              files should be(
+                Map(
+                  0 -> Map(
+                    "@{working}/a.in" -> new FileEntry(
+                      path = "@{working}/a.in",
+                      size = 1024,
+                      replicas = Seq(0)
+                    ),
+                    "@{working}/b.in" -> new FileEntry(
+                      path = "@{working}/b.in",
+                      size = 1024,
+                      replicas = Seq(0)
+                    )
+                  ),
+                  1 -> Map(
+                    "@{input}/c.in" -> new FileEntry(
+                      path = "@{input}/c.in",
+                      size = 1024,
+                      replicas = Seq(1)
+                    ),
+                    "@{input}/d.in" -> new FileEntry(
+                      path = "@{input}/d.in",
+                      size = 1024,
+                      replicas = Seq(1)
+                    )
+                  )
                 )
               )
             }
