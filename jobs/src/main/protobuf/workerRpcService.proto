@@ -13,7 +13,9 @@ import "error.proto";
 service Worker {
   /* Run the requested job and return result. */
   rpc RunJob(JobSpecMsg) returns (JobResult);
-  rpc Halt(WorkerHaltRequest) returns (google.protobuf.Empty);
+
+  /* Halt worker in case of fatal system error. */
+  rpc Halt(JobSystemError) returns (google.protobuf.Empty);
 }
 
 /* Job execution result. */
@@ -43,15 +45,8 @@ enum WorkerErrorKind {
   INPUT_REPLICATION_ERROR = 0;
   BODY_ERROR = 1;
   OUTPUT_REPLICATION_ERROR = 2;
-  WORKER_BUSY = 3;
 }
 
 message JobExecutionStats {
   int32 calculationTime = 1;
 }
-
-message WorkerHaltRequest {
-  string msg = 1;
-}
-
-\ No newline at end of file
