@@ -16,10 +16,13 @@ import redsort.jobs.Unreachable
 import redsort.jobs.scheduler.SchedulerFiberEvents.JobCompleted
 import redsort.jobs.messages.JobResult
 import redsort.jobs.scheduler.SchedulerFiberEvents.JobFailed
+import org.log4s._
 
 /** Scheduler fiber.
   */
 object SchedulerFiber {
+  private[this] val logger = getLogger
+
   def start(
       stateR: Ref[IO, SharedState],
       mainFiberQueue: Queue[IO, MainFiberEvents],
@@ -27,13 +30,14 @@ object SchedulerFiber {
       rpcClientFiberQueues: Map[Wid, Queue[IO, WorkerFiberEvents]],
       scheduleLogic: ScheduleLogic
   ): Resource[IO, Unit] =
-    main(
-      stateR,
-      mainFiberQueue,
-      schedulerFiberQueue,
-      rpcClientFiberQueues,
-      scheduleLogic
-    ).background.evalMap(_ => IO.unit)
+    IO(logger.debug("scheduler fiber started")).toResource >>
+      main(
+        stateR,
+        mainFiberQueue,
+        schedulerFiberQueue,
+        rpcClientFiberQueues,
+        scheduleLogic
+      ).background.evalMap(_ => IO.unit)
 
   private def main(
       stateR: Ref[IO, SharedState],
@@ -43,6 +47,7 @@ object SchedulerFiber {
       scheduleLogic: ScheduleLogic
   ): IO[Unit] = for {
     evt <- schedulerFiberQueue.take
+    _ <- IO(logger.debug(s"got event $evt"))
     _ <- handleEvent(evt, stateR, mainFiberQueue, rpcClientFiberQueues, scheduleLogic)
     _ <- main(stateR, mainFiberQueue, schedulerFiberQueue, rpcClientFiberQueues, scheduleLogic)
   } yield ()
@@ -80,15 +85,20 @@ object SchedulerFiber {
         // if all workers are initialized, emit Initialized event to main fiber,
         // and change state to Idle.
         _ <- IO.whenA(workerStates.forall { case (wid, state) => state.initialized })(
-          stateR.update { s =>
-            s.focus(_.schedulerFiber.state).replace(SchedulerState.Idle)
-          } >> mainFiberQueue.offer(MainFiberEvents.Initialized)
+          for {
+            _ <- stateR.update { s =>
+              s.focus(_.schedulerFiber.state).replace(SchedulerState.Idle)
+            }
+            _ <- IO(logger.debug("all workers initialized"))
+            _ <- mainFiberQueue.offer(MainFiberEvents.Initialized)
+          } yield ()
         )
       } yield ()
 
     case Halt(errMsg, from) =>
       for {
         exception <- IO.pure(JobSystemException.fromMsg(errMsg, from.toString()))
+        _ <- IO(logger.error(s"received halt event from $from: $errMsg"))
         _ <- mainFiberQueue.offer(
           new MainFiberEvents.SystemException(exception)
         )
@@ -96,6 +106,7 @@ object SchedulerFiber {
 
     case FatalError(error) =>
       for {
+        - <- IO(logger.error(s"received fatal error event: $error"))
         _ <- mainFiberQueue.offer(
           new MainFiberEvents.SystemException(error)
         )
@@ -113,6 +124,8 @@ object SchedulerFiber {
           )
         } else {
           for {
+            _ <- IO(logger.info(s"received ${specs.length} jobs"))
+
             // change state to Running.
             workerStates <- stateR
               .updateAndGet(s => s.focus(_.schedulerFiber.state).replace(SchedulerState.Running))
@@ -164,6 +177,11 @@ object SchedulerFiber {
                 case None => throw new Unreachable
               }
             })
+            _ <- IO(
+              logger.info(
+                s"$from completed job. pending: ${updatedState.schedulerFiber.workers(from).pendingJobs.length}, completed: ${updatedState.schedulerFiber.workers(from).completedJobs.length}"
+              )
+            )
 
             // if all jobs are completed, send JobCompleted event to main fiber.
             // otherwise submit another job into workers.
@@ -173,6 +191,7 @@ object SchedulerFiber {
             _ <-
               if (done) {
                 for {
+                  _ <- IO(logger.info("all jobs completed"))
                   _ <- mainFiberQueue.offer(
                     new MainFiberEvents.JobCompleted(
                       jobResults(updatedState.schedulerFiber.workers)
@@ -201,6 +220,9 @@ object SchedulerFiber {
 
     case JobFailed(result, from) => {
       for {
+        _ <- IO(
+          logger.error(s"$from failed to run job, reason: ${result.error.get.inner.get.message}")
+        )
         spec <- stateR.get.map(_.schedulerFiber.workers(from).runningJob.get.spec)
         _ <- mainFiberQueue.offer(new MainFiberEvents.JobFailed(spec = spec, result = result))
       } yield ()

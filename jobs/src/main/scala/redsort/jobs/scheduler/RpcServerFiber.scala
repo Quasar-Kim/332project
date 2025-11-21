@@ -13,9 +13,11 @@ import redsort.jobs.context.SchedulerCtx
 import redsort.jobs.context.interface.SchedulerRpcServer
 import redsort.jobs.Common._
 import redsort.jobs.scheduler
+import org.log4s._
 
 /* Implementation of scheduler RPC service. */
 object SchedulerRpcService {
+  private[this] val logger = getLogger
 
   /** Return a new object that implements `SchedulerFs2Grpc` trait.
     *
@@ -38,6 +40,7 @@ object SchedulerRpcService {
   ): SchedulerFs2Grpc[IO, Metadata] =
     new SchedulerFs2Grpc[IO, Metadata] {
       override def haltOnError(req: HaltRequest, meta: Metadata): IO[Empty] = for {
+        _ <- IO(logger.error(s"haltOnError called by ${req.source}: ${req.err}"))
         _ <- schedulerFiberQueue.offer(
           new SchedulerFiberEvents.Halt(req.err, Wid.fromMsg(req.source))
         )
@@ -47,6 +50,7 @@ object SchedulerRpcService {
 
       override def registerWorker(hello: WorkerHello, meta: Metadata): IO[SchedulerHello] = for {
         wid <- IO.pure(resolveWidFromNetAddr(workerAddrs, new NetAddr(hello.ip, hello.port)))
+        _ <- IO(logger.info(s"Worker $wid registered"))
         _ <- schedulerFiberQueue.offer(new SchedulerFiberEvents.WorkerRegistration(hello, wid))
       } yield {
         new SchedulerHello(
@@ -68,6 +72,7 @@ object SchedulerRpcService {
 
 /* Fiber serving scheduler RPC service. */
 object RpcServerFiber {
+  private[this] val logger = getLogger
 
   /** Start a RPC server.
     *
@@ -91,10 +96,12 @@ object RpcServerFiber {
       ctx: SchedulerRpcServer,
       workerAddrs: Map[Wid, NetAddr]
   ): Resource[IO, Server] =
-    ctx
-      .schedulerRpcServer(
-        SchedulerRpcService.init(stateR, schedulerFiberQueue, ctx, workerAddrs),
-        5000
-      )
-      .evalMap(server => IO(server.start()))
+    IO(logger.debug("scheduler RPC server fiber started")).toResource.flatMap { _ =>
+      ctx
+        .schedulerRpcServer(
+          SchedulerRpcService.init(stateR, schedulerFiberQueue, ctx, workerAddrs),
+          port
+        )
+        .evalMap(server => IO(server.start()))
+    }
 }

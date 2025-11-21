@@ -7,11 +7,12 @@ object Dependencies {
     
     // Libraries
     val catsEffect = "org.typelevel" %% "cats-effect" % "3.6.3"
-    val log4cats = "org.typelevel" %% "log4cats-slf4j" % "2.7.1"
     val grpcNetty = "io.grpc" % "grpc-netty-shaded" % scalapb.compiler.Version.grpcJavaVersion
     val scalapbRuntime = "com.thesamet.scalapb" %% "scalapb-runtime" % scalapb.compiler.Version.scalapbVersion % "protobuf"
     val monocleCore = "dev.optics" %% "monocle-core" % monocleVersion
     val monocleMacro = "dev.optics" %% "monocle-macro" % monocleVersion
+    val log4s = "org.log4s" %% "log4s" % "1.10.0"
+    val logback = "ch.qos.logback" % "logback-classic" % "1.3.5"
 
     // -- testing deps
     val scalaTest = "org.scalatest" %% "scalatest" % "3.2.19" % "test"
@@ -23,7 +24,6 @@ object Dependencies {
     // Projects
     val deps = Seq(
         catsEffect,
-        log4cats,
         grpcNetty,
         monocleCore,
         monocleMacro,
@@ -33,5 +33,7 @@ object Dependencies {
         scalamockCatsEffect,
         catsEffectTestingScalaTest,
         scalapbRuntime,
+        log4s,
+        logback,
     )
 }
