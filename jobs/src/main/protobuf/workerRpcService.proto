@@ -1,3 +1,5 @@
+/* RPC service provided by worker. */
+
 syntax = "proto3";
 
 package redsort.jobs.messages;
@@ -7,18 +9,31 @@ import "google/protobuf/any.proto";
 import "jobs.proto";
 import "error.proto";
 
+/* RPC service provided by worker. */
 service Worker {
+  /* Run the requested job and return result. */
   rpc RunJob(JobSpecMsg) returns (JobResult);
   rpc Halt(WorkerHaltRequest) returns (google.protobuf.Empty);
 }
 
+/* Job execution result. */
 message JobResult {
+  /* Indicates whether job completed without error. */
   bool success = 1;
+  /* Value returned by body function. */
   google.protobuf.Any retval = 2;
+  /* Error that happened during job execution.
+     NOTE: error of kind `OUTPUT_REPLICATION_ERROR` can be present here even though job succeeded. 
+           Output replication error is treated as nonfatal error. It will be handled by scheduler. */
   optional WorkerError error = 3;
+  /* Statistics related to job execution. */
   optional JobExecutionStats stats = 4;
 }
 
+/* Error that happend during job execution. 
+   This includes input/output replication and body function of a job.
+   This does NOT include unexpected errors in other part of system, which are (likely) programming error:
+   They are reported using `RequestHalt` method of scheduler RPC service. */
 message WorkerError {
   WorkerErrorKind kind = 1;
   JobSystemError inner = 2;
@@ -38,3 +53,5 @@ message JobExecutionStats {
 message WorkerHaltRequest {
   string msg = 1;
 }
+
+\ No newline at end of file
