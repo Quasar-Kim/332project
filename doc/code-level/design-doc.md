@@ -209,7 +209,10 @@ Upon start, scheduler fiber runs as follows:
     5. if `msg` is `JobCompleted(result, from)`, check `schedulerState.status`.
         1. If `== Running`:
             1. move running job of worker with ID `from` to completed job list, manipulating `sharedState`. Then, check how many jobs are left to be run.
-            2. If all jobs are completed, send list of completed jobs to main fiber (that is running `runJobs`) and change `schedulerState.status` to `Idle`. 
+            2. If all jobs are completed:
+							1. send list of completed jobs to main fiber (that is running `runJobs`)
+							2. update file entries of each workers by removing intermediate files and adding output files.
+							3. change `schedulerState.status` to `Idle`. 
             3. If there are remaining jobs, then check if pending job list of the worker is empty. If not empty, then run another job as describe in (2.4.1.3). If empty, then do nothing.
         2. Otherwise, go to *raiseError*.
     6. if `msg` is `WorkerNotResponding(from)`, check if `schedulerState.status == Running`.

@@ -16,6 +16,8 @@ import redsort.jobs.messages.JobSystemError
 import redsort.jobs.messages.NetAddrMsg
 import scala.concurrent.duration._
 import redsort.jobs.messages.HaltRequest
+import redsort.jobs.messages.LocalStorageInfo
+import redsort.jobs.messages.FileEntryMsg
 
 class RpcServerFiberSpec extends AsyncSpec {
   def fixture = new {
