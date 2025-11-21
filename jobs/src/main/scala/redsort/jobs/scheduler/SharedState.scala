@@ -286,9 +286,11 @@ object WorkerFiberEvents {
   */
 sealed abstract class MainFiberEvents
 object MainFiberEvents {
-  final case object Initialized extends MainFiberEvents
-  final case class JobCompleted(results: Seq[Tuple2[JobSpec, msg.JobResult]])
-      extends MainFiberEvents
+  final case class Initialized(files: Map[Mid, Map[String, FileEntry]]) extends MainFiberEvents
+  final case class JobCompleted(
+      results: Seq[Tuple2[JobSpec, msg.JobResult]],
+      files: Map[Mid, Map[String, FileEntry]]
+  ) extends MainFiberEvents
   final case class JobFailed(spec: JobSpec, result: msg.JobResult) extends MainFiberEvents
   final case class SystemException(error: Throwable) extends MainFiberEvents
 }

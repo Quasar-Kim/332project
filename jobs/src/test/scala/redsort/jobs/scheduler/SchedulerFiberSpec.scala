@@ -1,6 +1,6 @@
 package redsort.jobs.scheduler
 
-import redsort.FlatSpecBase
+import redsort.AsyncSpec
 import redsort.jobs.Common._
 import cats._
 import cats.effect._
@@ -17,8 +17,10 @@ import redsort.jobs.messages.JobResult
 import redsort.jobs.Unreachable
 import redsort.jobs.messages.WorkerError
 import redsort.jobs.messages.WorkerErrorKind
+import redsort.jobs.messages.LocalStorageInfo
+import redsort.jobs.messages.FileEntryMsg
 
-class SchedulerFiberSpec extends FlatSpecBase {
+class SchedulerFiberSpec extends AsyncSpec {
   def fixture = new {
     val workerAddrs = Map(
       new Wid(0, 0) -> new NetAddr("1.1.1.1", 5000),
@@ -36,7 +38,7 @@ class SchedulerFiberSpec extends FlatSpecBase {
       override def schedule(
           workerStates: Map[Wid, WorkerState],
           specs: Seq[JobSpec]
-      ): IO[Map[Wid, WorkerState]] = {
+      ): Map[Wid, WorkerState] = {
         // schedule each job to Wid((i / 2) % 2, i % 2)
         val updatedWorkerStates = specs.zipWithIndex.foldLeft(workerStates) {
           case (acc, (spec, i)) =>
@@ -50,7 +52,7 @@ class SchedulerFiberSpec extends FlatSpecBase {
             val updatedWorkerState = acc(wid).focus(_.pendingJobs).modify(q => q.enqueue(job))
             acc.updated(wid, updatedWorkerState)
         }
-        IO.pure(updatedWorkerStates)
+        updatedWorkerStates
       }
 
       override def evaluate(spec: JobSpec, wid: Wid, workerState: WorkerState): ScheduleEvaluation =
@@ -89,7 +91,24 @@ class SchedulerFiberSpec extends FlatSpecBase {
           new SchedulerFiberEvents.WorkerRegistration(
             new WorkerHello(
               wtid = 0,
-              storageInfo = None,
+              storageInfo = Some(
+                new LocalStorageInfo(
+                  mid = None,
+                  remainingStorage = 1024,
+                  entries = Map(
+                    "@{working}/a.in" -> new FileEntryMsg(
+                      path = "@{working}/a.in",
+                      size = 1024,
+                      replicas = Seq()
+                    ),
+                    "@{working}/b.in" -> new FileEntryMsg(
+                      path = "@{working}/b.in",
+                      size = 1024,
+                      replicas = Seq()
+                    )
+                  )
+                )
+              ),
               ip = "1.1.1.1"
             ),
             new Wid(0, 0)
@@ -105,7 +124,24 @@ class SchedulerFiberSpec extends FlatSpecBase {
           new SchedulerFiberEvents.WorkerRegistration(
             new WorkerHello(
               wtid = 0,
-              storageInfo = None,
+              storageInfo = Some(
+                new LocalStorageInfo(
+                  mid = None,
+                  remainingStorage = 1024,
+                  entries = Map(
+                    "@{input}/c.in" -> new FileEntryMsg(
+                      path = "@{input}/c.in",
+                      size = 1024,
+                      replicas = Seq()
+                    ),
+                    "@{input}/d.in" -> new FileEntryMsg(
+                      path = "@{input}/d.in",
+                      size = 1024,
+                      replicas = Seq()
+                    )
+                  )
+                )
+              ),
               ip = "1.1.1.2"
             ),
             new Wid(1, 0)
@@ -122,7 +158,7 @@ class SchedulerFiberSpec extends FlatSpecBase {
       )
       evt <- mainFiberQueue.take
     } yield {
-      assume(evt == MainFiberEvents.Initialized)
+      assume(evt.isInstanceOf[MainFiberEvents.Initialized])
     }
   }
 
@@ -146,7 +182,24 @@ class SchedulerFiberSpec extends FlatSpecBase {
     val f = fixture
     val workerHello = new WorkerHello(
       wtid = 0,
-      storageInfo = None,
+      storageInfo = Some(
+        new LocalStorageInfo(
+          mid = Some(1),
+          remainingStorage = 1024,
+          entries = Map(
+            "@{working}/a" -> new FileEntryMsg(
+              path = "@{working}/a",
+              size = 1024,
+              replicas = Seq(1)
+            ),
+            "@{working}/b" -> new FileEntryMsg(
+              path = "@{working}/b",
+              size = 1024,
+              replicas = Seq(1)
+            )
+          )
+        )
+      ),
       ip = "1.1.1.2"
     )
 
@@ -164,6 +217,16 @@ class SchedulerFiberSpec extends FlatSpecBase {
           val s = state.schedulerFiber.workers(wid)
           s.initialized should be(true)
           s.status should be(WorkerStatus.Up)
+          state.schedulerFiber.files(wid.mid) should be(
+            Map(
+              "@{working}/a" -> new FileEntry(
+                path = "@{working}/a",
+                size = 1024,
+                replicas = Seq(1)
+              ),
+              "@{working}/b" -> new FileEntry(path = "@{working}/b", size = 1024, replicas = Seq(1))
+            )
+          )
         }
       }
       .timeout(1.second)
@@ -327,7 +390,7 @@ class SchedulerFiberSpec extends FlatSpecBase {
       .timeout(1.second)
   }
 
-  it should "return job specs to caller and change state to Idle if all jobs are completed" in {
+  it should "return job specs and files to caller and change state to Idle if all jobs are completed" in {
     val f = fixture
     val jobResult = new JobResult(
       success = true,
@@ -361,7 +424,7 @@ class SchedulerFiberSpec extends FlatSpecBase {
           result <- mainFiberQueue.take
         } yield {
           result match {
-            case MainFiberEvents.JobCompleted(results) => {
+            case MainFiberEvents.JobCompleted(results, files) => {
               results should be(
                 Seq(
                   (jobSpecA, jobResult),
@@ -370,9 +433,143 @@ class SchedulerFiberSpec extends FlatSpecBase {
                   (jobSpecD, jobResult)
                 )
               )
+              files should be(
+                Map(
+                  0 -> Map(
+                    "@{working}/a.in" -> new FileEntry(
+                      path = "@{working}/a.in",
+                      size = 1024,
+                      replicas = Seq(0)
+                    ),
+                    "@{working}/b.in" -> new FileEntry(
+                      path = "@{working}/b.in",
+                      size = 1024,
+                      replicas = Seq(0)
+                    )
+                  ),
+                  1 -> Map(
+                    "@{input}/c.in" -> new FileEntry(
+                      path = "@{input}/c.in",
+                      size = 1024,
+                      replicas = Seq(1)
+                    ),
+                    "@{input}/d.in" -> new FileEntry(
+                      path = "@{input}/d.in",
+                      size = 1024,
+                      replicas = Seq(1)
+                    )
+                  )
+                )
+              )
             }
             case _ => fail("result is not JobCompleted")
           }
+        }
+      }
+      .timeout(1.second)
+  }
+
+  it should "update worker file entries if all jobs are completed" in {
+    val f = fixture
+    val jobResult = new JobResult(
+      success = true,
+      retval = None,
+      error = None,
+      stats = None
+    )
+    val wid = new Wid(0, 0)
+    val jobSpec1 = new JobSpec(
+      name = "x",
+      args = Seq(),
+      inputs = Seq(new FileEntry(path = "@{working}/a.in", size = 1024, replicas = Seq(0))),
+      outputs = Seq(new FileEntry(path = "@{working}/a.out", size = 1024, replicas = Seq(0)))
+    )
+    val jobSpec2 = new JobSpec(
+      name = "x",
+      args = Seq(),
+      inputs = Seq(new FileEntry(path = "@{working}/b.in", size = 1024, replicas = Seq(0))),
+      outputs = Seq(new FileEntry(path = "@{working}/b.out", size = 1024, replicas = Seq(0)))
+    )
+    val jobSpec3 = new JobSpec(
+      name = "x",
+      args = Seq(),
+      inputs = Seq(new FileEntry(path = "@{input}/c.in", size = 1024, replicas = Seq(1))),
+      outputs = Seq(new FileEntry(path = "@{working}/c.out", size = 1024, replicas = Seq(1)))
+    )
+    val jobSpec4 = new JobSpec(
+      name = "x",
+      args = Seq(),
+      inputs = Seq(new FileEntry(path = "@{input}/d.in", size = 1024, replicas = Seq(1))),
+      outputs = Seq(new FileEntry(path = "@{working}/d.out", size = 1024, replicas = Seq(1)))
+    )
+
+    f.startSchedulerFiber
+      .use { case (stateR, mainFiberQueue, schedulerFiberQueue, rpcClientFiberQueues) =>
+        for {
+          _ <- f.initAll(stateR, mainFiberQueue, schedulerFiberQueue)
+          _ <- schedulerFiberQueue.offer(
+            new SchedulerFiberEvents.Jobs(Seq(jobSpec1, jobSpec2, jobSpec3, jobSpec4))
+          )
+          _ <- rpcClientFiberQueues(new Wid(0, 0)).take
+          _ <- rpcClientFiberQueues(new Wid(0, 1)).take
+          _ <- rpcClientFiberQueues(new Wid(1, 0)).take
+          _ <- rpcClientFiberQueues(new Wid(1, 1)).take
+
+          // enqueue JobCompleted event
+          _ <- schedulerFiberQueue.tryOfferN(
+            List(
+              new SchedulerFiberEvents.JobCompleted(jobResult, new Wid(0, 0)),
+              new SchedulerFiberEvents.JobCompleted(jobResult, new Wid(0, 1)),
+              new SchedulerFiberEvents.JobCompleted(jobResult, new Wid(1, 0)),
+              new SchedulerFiberEvents.JobCompleted(jobResult, new Wid(1, 1))
+            )
+          )
+
+          // wait for job completion event
+          _ <- mainFiberQueue.take
+          state <- stateR.get
+        } yield {
+          // files on machine 0 were all in working directory - they are deleted
+          state.schedulerFiber.files(0) should be(
+            Map(
+              "@{working}/a.out" -> new FileEntry(
+                path = "@{working}/a.out",
+                size = 1024,
+                replicas = Seq(0)
+              ),
+              "@{working}/b.out" -> new FileEntry(
+                path = "@{working}/b.out",
+                size = 1024,
+                replicas = Seq(0)
+              )
+            )
+          )
+
+          // files on machine 1 were all in input directory - they are preserved
+          state.schedulerFiber.files(1) should be(
+            Map(
+              "@{input}/c.in" -> new FileEntry(
+                path = "@{input}/c.in",
+                size = 1024,
+                replicas = Seq(1)
+              ),
+              "@{input}/d.in" -> new FileEntry(
+                path = "@{input}/d.in",
+                size = 1024,
+                replicas = Seq(1)
+              ),
+              "@{working}/c.out" -> new FileEntry(
+                path = "@{working}/c.out",
+                size = 1024,
+                replicas = Seq(1)
+              ),
+              "@{working}/d.out" -> new FileEntry(
+                path = "@{working}/d.out",
+                size = 1024,
+                replicas = Seq(1)
+              )
+            )
+          )
         }
       }
       .timeout(1.second)

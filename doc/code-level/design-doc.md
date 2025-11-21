@@ -137,6 +137,13 @@ enum SchedulerFiberEvents {
   // Halt RPC method has been called.
   // Cancel RPC clients and server fibers and raise error.
   Halt(err: JobSystemError, from: Wid)
+
+	// Helps accurate worker status tracking even in case where
+	// scheduler receives status-related message in following order:
+	//   1. WorkerHello
+	//   2. WorkerNotResponding (or other fault detecting messages)
+	// In this case, heartbeat will eventually change worker status to UP.
+	Heartbeat(from: Wid)
   
   // sent by RPC client fiber:
   
@@ -202,13 +209,19 @@ Upon start, scheduler fiber runs as follows:
     5. if `msg` is `JobCompleted(result, from)`, check `schedulerState.status`.
         1. If `== Running`:
             1. move running job of worker with ID `from` to completed job list, manipulating `sharedState`. Then, check how many jobs are left to be run.
-            2. If all jobs are completed, send list of completed jobs to main fiber (that is running `runJobs`) and change `schedulerState.status` to `Idle`. 
+            2. If all jobs are completed:
+							1. send list of completed jobs to main fiber (that is running `runJobs`)
+							2. update file entries of each workers by removing intermediate files and adding output files.
+							3. change `schedulerState.status` to `Idle`. 
             3. If there are remaining jobs, then check if pending job list of the worker is empty. If not empty, then run another job as describe in (2.4.1.3). If empty, then do nothing.
         2. Otherwise, go to *raiseError*.
     6. if `msg` is `WorkerNotResponding(from)`, check if `schedulerState.status == Running`.
         1. If true, then go to *handleFault*.
         2. If false, then go to *raiseError*.
 		7. if `msg` is `JobFailed`, go to *raiseError*.
+		8. if `msg` is `Heartbeat`:
+				1. Change status of worker to UP.
+				2. Send `WorkerUp` to RPC client of the worker.
 3. Go back to 1.
 
 *raiseError*:
@@ -218,7 +231,7 @@ Upon start, scheduler fiber runs as follows:
 
 *handleFault*:
 
-1. Change status of faulting worker to DOWN.
+1. Change status of faulting worker to DOWN. **It is important to NOT change states other than worker status.**
 2. Go to *reschedule*.
 
 *reschedule*:

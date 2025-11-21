@@ -2,7 +2,7 @@ package redsort.jobs.scheduler
 
 import cats.effect._
 import org.scalamock.stubs.Stubs
-import redsort.FlatSpecBase
+import redsort.AsyncSpec
 import redsort.jobs.Common._
 import cats.effect.std.Queue
 import redsort.jobs.context.interface.WorkerRpcClient
@@ -15,7 +15,7 @@ import redsort.jobs.messages.WorkerError
 import redsort.jobs.messages.WorkerErrorKind
 import redsort.jobs.messages.JobSystemError
 
-class WorkerRpcClientFiberSpec extends FlatSpecBase {
+class WorkerRpcClientFiberSpec extends AsyncSpec {
   def fixture =
     new {
       val sharedState = SharedState.init(

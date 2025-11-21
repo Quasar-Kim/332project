@@ -62,23 +62,41 @@ object SchedulerFiber {
     case WorkerRegistration(hello, from) =>
       for {
         workerStates <- stateR.get.map(s => s.schedulerFiber.workers)
-        _ <- assertIO(workerStates(from).initialized)
+        _ <- assertIO(!workerStates(from).initialized)
 
-        // update worker state with initalized field set to true
-        // and status field to UP.
         workerStates <- stateR
           .updateAndGet { state =>
-            state.focus(_.schedulerFiber.workers).at(from).modify {
-              case Some(s) => {
-                Some(
-                  s.focus(_.initialized)
-                    .replace(true)
-                    .focus(_.status)
-                    .replace(WorkerStatus.Up)
-                )
+            // update worker state by setting initialized field to true
+            state
+              .focus(_.schedulerFiber.workers)
+              .at(from)
+              .modify {
+                case Some(s) => {
+                  Some(
+                    s.focus(_.initialized)
+                      .replace(true)
+                      .focus(_.status)
+                      .replace(WorkerStatus.Up)
+                  )
+                }
+                case None => None
               }
-              case None => None
-            }
+              // also update file entries of a machine according to WorkerHello
+              .focus(_.schedulerFiber.files)
+              .at(from.mid)
+              .modify { files =>
+                hello.storageInfo match {
+                  case Some(info) =>
+                    Some(
+                      info.entries.view
+                        .mapValues(
+                          FileEntry.fromMsg(_).focus(_.replicas).replace(Seq(from.mid))
+                        ) // set mid as only replica of input files.
+                        .to(Map)
+                    )
+                  case None => files
+                }
+              }
           }
           .map(s => s.schedulerFiber.workers)
 
@@ -86,11 +104,11 @@ object SchedulerFiber {
         // and change state to Idle.
         _ <- IO.whenA(workerStates.forall { case (wid, state) => state.initialized })(
           for {
-            _ <- stateR.update { s =>
+            state <- stateR.updateAndGet { s =>
               s.focus(_.schedulerFiber.state).replace(SchedulerState.Idle)
             }
             _ <- IO(logger.debug("all workers initialized"))
-            _ <- mainFiberQueue.offer(MainFiberEvents.Initialized)
+            _ <- mainFiberQueue.offer(new MainFiberEvents.Initialized(state.schedulerFiber.files))
           } yield ()
         )
       } yield ()
@@ -132,7 +150,9 @@ object SchedulerFiber {
               .map(_.schedulerFiber.workers)
 
             // schedule and submit jobs to each workers.
-            workerStates <- scheduleLogic.schedule(workerStates, specs)
+            workerStates <- IO(
+              scheduleLogic.schedule(workerStates, specs)
+            ) // this is IO (not IO.pure) to allow logging inside scheduleLogic
             workerStates <- submitJob(workerStates, rpcClientFiberQueues)
 
             // update worker states.
@@ -157,7 +177,7 @@ object SchedulerFiber {
           )
         } else {
           for {
-            // move running job to completed job
+            // move running job to completed job, chaning its state
             updatedState <- IO.pure({
               val workerState = state.schedulerFiber.workers(from)
               workerState.runningJob match {
@@ -183,7 +203,9 @@ object SchedulerFiber {
               )
             )
 
-            // if all jobs are completed, send JobCompleted event to main fiber.
+            // if all jobs are completed,
+            //   - update file entries of each machine.
+            //   - send JobCompleted event to main fiber.
             // otherwise submit another job into workers.
             done <- IO.pure(updatedState.schedulerFiber.workers.forall { case (_, state) =>
               state.pendingJobs.isEmpty && state.runningJob.isEmpty
@@ -192,9 +214,11 @@ object SchedulerFiber {
               if (done) {
                 for {
                   _ <- IO(logger.info("all jobs completed"))
+                  updatedState <- IO.pure(updateFileEntries(updatedState))
                   _ <- mainFiberQueue.offer(
                     new MainFiberEvents.JobCompleted(
-                      jobResults(updatedState.schedulerFiber.workers)
+                      jobResults(updatedState.schedulerFiber.workers),
+                      updatedState.schedulerFiber.files
                     )
                   )
                   _ <- stateR.set(
@@ -260,6 +284,42 @@ object SchedulerFiber {
       .map { workerStatesUpdates =>
         workerStates ++ workerStatesUpdates
       }
+  }
+
+  def updateFileEntries(state: SharedState): SharedState = {
+    // for each machine, collect all completed jobs.
+    val completedJobsPerMachine = state.schedulerFiber.workers
+      .groupBy(_._1.mid)
+      .view
+      .mapValues(m =>
+        m.collect[Seq[JobSpec]] { case (wid, state) => state.completedJobs.map(_.spec).toSeq }
+          .flatten
+      )
+      .to(Map)
+
+    // collect deleted and added file entries.
+    // input files are excluded.
+    val deletedFiles = completedJobsPerMachine.view
+      .mapValues { specs =>
+        specs.map(_.inputs.map(_.path).filter(!_.startsWith("@{input}"))).flatten.to(Seq)
+      }
+      .to(Map)
+    val addedFileEntries = completedJobsPerMachine.view
+      .mapValues { specs =>
+        specs.map(_.outputs.map(entry => (entry.path, entry))).flatten.to(Map)
+      }
+      .to(Map)
+
+    // apply changes to files
+    val files =
+      state.schedulerFiber.files
+        .lazyZip(deletedFiles)
+        .lazyZip(addedFileEntries)
+        .map { case ((mid, entries), (_, deletions), (_, additions)) =>
+          (mid, entries.removedAll(deletions).concat(additions))
+        }
+        .to(Map)
+    state.focus(_.schedulerFiber.files).replace(files)
   }
 
   def jobResults(workerStates: Map[Wid, WorkerState]): Seq[Tuple2[JobSpec, JobResult]] =

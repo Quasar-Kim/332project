@@ -71,5 +71,9 @@ object Common {
 
   /* Cats IO version of assert(). */
   def assertIO(pred: Boolean, msg: String = "IO assertion failure") =
-    IO.raiseWhen(pred)(new AssertionError(msg))
+    IO.raiseWhen(!pred)(new AssertionError(msg))
+
+  def unreachableIO[A]: IO[A] = IO.raiseError[A](new Unreachable)
+
+  def notImplmenetedIO[A]: IO[A] = IO.raiseError[A](new NotImplementedError)
 }

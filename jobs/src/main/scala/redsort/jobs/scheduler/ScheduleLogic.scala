@@ -16,7 +16,7 @@ trait ScheduleLogic {
     * @return
     *   a new worker state.
     */
-  def schedule(workerStates: Map[Wid, WorkerState], specs: Seq[JobSpec]): IO[Map[Wid, WorkerState]]
+  def schedule(workerStates: Map[Wid, WorkerState], specs: Seq[JobSpec]): Map[Wid, WorkerState]
 
   /** Given one of worker, check whether job is runnable on that worker.
     *
