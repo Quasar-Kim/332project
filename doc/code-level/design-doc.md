@@ -176,11 +176,10 @@ struct SchedulerState {
   status: SchedulerStatus
 }
   
-// Idle ---> Running ---> Synchronizing ---> Idle
+// Initializing ---> Idle ---> Running ---> Idle
 enum SchedulerStatus {
 	Idle                 // not running any jobs, initial status
 	Running              // running requested jobs
-	Synchonizing         // running synchornization jobs
 }
 ```
 
@@ -192,26 +191,24 @@ Upon start, scheduler fiber runs as follows:
         1. If it is not initialized, then worker is initializing normally and its status must be DOWN. Initialize worker’s status of `sharedState` according to `hello` and set worker status to UP.
         2. If it is already initialized, check worker’s status.
             1. If status is DOWN, then the worker is recovering from machine fault. Initialize worker’s status of `sharedState` according to `hello`, setting worker status to UP. Then enqueue `WorkerUp` to input queue of RPC client fiber managing communcation with worker with ID `from`.
-            2. If status is UP, then the worker was restarted due to machine fault but it was not detected by other mechanisms. Go to *handleFault.*
-    2. If `msg` is `HeartbeatTimeout(from)`, then change status of worker with ID `from` to DOWN, perform *handleFault.*
+            2. If status is UP, then the worker was restarted due to machine fault but it was not detected by other mechanisms. Go to *reschedule.*
+    2. If `msg` is `HeartbeatTimeout(from)`, then go to *handleFault.*
     3. If `msg` is `Halt(err, from)` or `FatalError(err)`, then goto *raiseError*. (behavior of two events are same except they produce different error messages to faciliate debugging)
     4. If `msg` is `Jobs(specs)`, check if `schedulerState.status == Idle`.
-        1. If true, then run function `schedule` to enqueue `Job`s into each worker’s pending job list. Then for each worker, dequeue one `job`, change its state to `Running`, put it to running job slot of `sharedState`, and enqueue one `Job(job.spec)` message into RPC client of the worker. Finally change `schedulerState.status` to `Running`.
+        1. If true, then do followings
+						1. run function `schedule` to enqueue `Job`s into each worker’s pending job list.
+						2. for each worker, dequeue one `job`, change its state to `Running`, put it to running job slot of `sharedState`, and enqueue one `Job(job.spec)` message into RPC client of the worker. Finally change `schedulerState.status` to `Running`.
         2. if false, then go to *raiseError*.
     5. if `msg` is `JobCompleted(result, from)`, check `schedulerState.status`.
         1. If `== Running`:
             1. move running job of worker with ID `from` to completed job list, manipulating `sharedState`. Then, check how many jobs are left to be run.
-            2. If all jobs are completed, change `schedulerState.status` to `Synchronizing`, then create and enqueue `Job` to each *machine*. This means only one synchronization is sent to one of worker of each machines.
-            3. If there are remaining jobs, then check if pending job list of the worker is empty,
-                1. If pending job list is empty, go to *reschedule*.
-                2. If not empty, then run another job as describe in (2.d.i).
-        2. If `== Synchonizing`:
-            1. Check if all jobs are completed. If true, then send `Left(())` to `runJobs` and change `schedulerState.status` to `Idle`.
-            2. Else, do nothing.
-        3. Otherwise, go to *raiseError*.
+            2. If all jobs are completed, send list of completed jobs to main fiber (that is running `runJobs`) and change `schedulerState.status` to `Idle`. 
+            3. If there are remaining jobs, then check if pending job list of the worker is empty. If not empty, then run another job as describe in (2.4.1.3). If empty, then do nothing.
+        2. Otherwise, go to *raiseError*.
     6. if `msg` is `WorkerNotResponding(from)`, check if `schedulerState.status == Running`.
         1. If true, then go to *handleFault*.
         2. If false, then go to *raiseError*.
+		7. if `msg` is `JobFailed`, go to *raiseError*.
 3. Go back to 1.
 
 *raiseError*:
@@ -227,8 +224,10 @@ Upon start, scheduler fiber runs as follows:
 *reschedule*:
 
 1. Flush input queue of every workers, simultaneously enqueuing `WorkerDown`.
-2. Collect jobs to reschedule from from pending job list of all workers, and running job slot of faulting machine (if reschedule has been triggered by fault).
-3. Call `schedule` function.
+2. Collect jobs to reschedule from pending job list of all workers and running job slot of faulting machine (if reschedule has been triggered by fault).
+3. Go to (2.4.1.1) and do subsequent steps. 
+
+NOTE: synchornization step is completely removed. They should be implemeneted as a seperate job.
 
 ### RPC Client Behavior
 

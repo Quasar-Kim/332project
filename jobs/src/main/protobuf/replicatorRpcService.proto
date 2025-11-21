@@ -1,16 +1,21 @@
+/* RPC service provided by file replication service (replicator).
+   It provides two services - one for local workers, and another one for remote replicator. */
+
 syntax = "proto3";
 
 package redosrt.jobs.messages;
 
 import "google/protobuf/empty.proto";
 
-// service for local workers
+/* RPC service called by local workers. 
+   Provide Push() method to replicate file to another machine, and Pull() method to do the inverse. 
+   Replicator invokes RPC method of `REplicationRemoteServicer` of remote replicator to transmit data. */
 service ReplicatorLocalService {
   rpc Push(PushRequest) returns (ReplicationResult);
   rpc Pull(PullRequest) returns (ReplicationResult);
 }
 
-// service for remote replicator
+/* RPC service called remote workers. */
 service ReplicatorRemoteService {
   rpc Read(ReadRequest) returns (stream Packet);
   rpc Write(stream WriteRequest) returns (google.protobuf.Empty);  

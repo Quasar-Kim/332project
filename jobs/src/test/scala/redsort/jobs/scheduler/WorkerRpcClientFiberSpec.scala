@@ -36,8 +36,7 @@ class WorkerRpcClientFiberSpec extends FlatSpecBase {
     name = "test",
     args = Seq(),
     inputs = Seq(),
-    outputs = Seq(),
-    outputSize = 0
+    outputs = Seq()
   )
 
   val successfulJobResult = new JobResult(

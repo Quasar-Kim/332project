@@ -6,7 +6,6 @@ import fs2.grpc.syntax.all._
 import redsort.jobs.messages.WorkerFs2Grpc
 import io.grpc.netty.shaded.io.grpc.netty.NettyChannelBuilder
 import com.google.protobuf.empty.Empty
-import redsort.jobs.messages.WorkerHaltRequest
 import redsort.jobs.context.interface.WorkerRpcClient
 import io.grpc.Metadata
 

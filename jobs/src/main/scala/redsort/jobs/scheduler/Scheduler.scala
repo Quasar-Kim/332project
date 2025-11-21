@@ -6,26 +6,85 @@ import cats.effect.std.{Supervisor, Queue}
 import cats.syntax.all._
 import redsort.jobs.Common._
 import redsort.jobs.context.SchedulerCtx
+import redsort.jobs.messages.JobResult
 
-trait Scheduler {}
+/** A frontend of job scheduling system.
+  */
+trait Scheduler {
 
+  /** Wait for all workers to be initialized.
+    */
+  def waitInit: IO[Unit]
+
+  /** Run requested jobs in worker cluster.
+    *
+    * @param specs
+    *   a sequence of job specifications to launch.
+    *
+    * @return
+    *   a sequence of tuple of each job specifications and its result.
+    */
+  def runJobs(specs: Seq[JobSpec]): IO[Seq[Tuple2[JobSpec, JobResult]]]
+}
+
+/** Entry point to job scheduling system.
+  */
 object Scheduler {
-  def apply(workers: Seq[Seq[NetAddr]], ctx: SchedulerCtx): Resource[IO, Scheduler] = {
+
+  /** Start a job system. Launches background fibers consisting scheduler system.
+    *
+    * @param port
+    *   port on which scheduler RPC service will run.
+    * @param workers
+    *   Sequence of sequence of network address of each workers.
+    * @param ctx
+    *   Context object providing dependencies.
+    * @param scheduleLogic
+    *   scheduling logic used by scheduler.
+    * @return
+    *   a resource wrapping `Scheduler` logic that allow user to interact with scheduler system.
+    */
+  def apply(
+      port: Int,
+      workers: Seq[Seq[NetAddr]],
+      ctx: SchedulerCtx,
+      scheduleLogic: ScheduleLogic
+  ): Resource[IO, Scheduler] = {
     for {
-      workerAddrs <- workerAddresses(workers).toResource
       supervisor <- Supervisor[IO]
+
+      // Initialize internal shared states.
+      workerAddrs <- workerAddresses(workers).toResource
+      stateR <- SharedState.init(workerAddrs).toResource
+
+      // Create input queues of each fibers.
       schedulerFiberQueue <- Queue.unbounded[IO, SchedulerFiberEvents].toResource
+      mainFiberQueue <- Queue.unbounded[IO, MainFiberEvents].toResource
       rpcClientFiberQueues <- createRpcClientFiberQueues(workerAddrs).toResource
+
+      // Launch each fibers in background
       _ <- Resource.eval {
         for {
-          stateR <- SharedState.init(workerAddrs)
           _ <- (
-            // TODO: we need mechanism to allocate port numbers without overlapping one
-            // to allow local testing
+            // Launch scheduler RPC service fiber.
             supervisor.supervise(
-              RpcServerFiber.start(5000, stateR, schedulerFiberQueue, ctx, workerAddrs).useForever
+              RpcServerFiber.start(port, stateR, schedulerFiberQueue, ctx, workerAddrs).useForever
             ),
-            supervisor.supervise(SchedulerFiber.start(stateR).useForever),
+
+            // Launch scheduler fiber.
+            supervisor.supervise(
+              SchedulerFiber
+                .start(
+                  stateR,
+                  mainFiberQueue,
+                  schedulerFiberQueue,
+                  rpcClientFiberQueues,
+                  scheduleLogic
+                )
+                .useForever
+            ),
+
+            // Launch worker RPC service client fibers for each workers.
             workerAddrs.keys.toList.parTraverse_ { wid =>
               supervisor.supervise(
                 WorkerRpcClientFiber
@@ -36,9 +95,32 @@ object Scheduler {
           ).parTupled.void
         } yield ()
       }
-    } yield new Scheduler {}
+    } yield new Scheduler {
+      override def waitInit: IO[Unit] = for {
+        state <- stateR.get
+        _ <- assertIO(
+          state.schedulerFiber.state == SchedulerState.Initializing,
+          "state must be initializing"
+        )
+        evt <- mainFiberQueue.take
+        _ <- assertIO(
+          evt == MainFiberEvents.Initialized,
+          "initialized event must be emitted"
+        )
+      } yield ()
+
+      def runJobs(specs: Seq[JobSpec]): IO[Seq[Tuple2[JobSpec, JobResult]]] =
+        IO.raiseError(new NotImplementedError)
+    }
   }
 
+  /** Convert sequence of sequence of network addresses into map from worker ID to network address.
+    *
+    * @param workers
+    *   sequence of sequence of network addresses.
+    * @return
+    *   map from worker ID to network address.
+    */
   def workerAddresses(workers: Seq[Seq[NetAddr]]): IO[Map[Wid, NetAddr]] = {
     val entries = for {
       (inner, mid) <- workers.zipWithIndex
@@ -47,6 +129,13 @@ object Scheduler {
     IO.pure(entries.toMap)
   }
 
+  /** Create input queue of each worker RPC client fibers.
+    *
+    * @param workers
+    *   map from worker ID to network address.
+    * @return
+    *   map from worker ID to queue of each worker RPC client fibers.
+    */
   def createRpcClientFiberQueues(
       workers: Map[Wid, NetAddr]
   ): IO[Map[Wid, Queue[IO, WorkerFiberEvents]]] =

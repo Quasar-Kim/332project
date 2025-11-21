@@ -1,9 +1,13 @@
+/* Messages related to a job instance. */
+
 syntax = "proto3";
 
 import "google/protobuf/any.proto";
 import "storage.proto";
 
 package redsort.jobs.messages;
+
+/* Message version of JobSpec(). */
 message JobSpecMsg {
   string name = 1;
   repeated google.protobuf.Any args = 2;

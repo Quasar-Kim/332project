@@ -1,3 +1,5 @@
+/* RPC service provided by scheduler to workers. */
+
 syntax = "proto3";
 
 package redsort.jobs.messages;
@@ -8,23 +10,47 @@ import "common.proto";
 import "scalapb/scalapb.proto";
 import "google/protobuf/empty.proto";
 
+/* RPC service provided by scheduler to workers. */
 service Scheduler {
+  /* Notify scheduler that worker has been initialized. */
   rpc RegisterWorker (WorkerHello) returns (SchedulerHello);
-  rpc NotifyUp (google.protobuf.Empty) returns (google.protobuf.Empty);
+
+  /* Worker heartbeat method. Each worker must call this method periodically. */
+  rpc NotifyUp (NotifyUpRequest) returns (google.protobuf.Empty);
+
+  /* Request scheduler to halt entire system in case of fatal error. */
   rpc HaltOnError(HaltRequest) returns (google.protobuf.Empty);
 }
 
 message WorkerHello {
+  /* Worker thread ID. */
   int32 wtid = 1;
+  /* Files and remaining storage of machine hosting the worker. Only sent by worker with wtid = 0. */
   optional LocalStorageInfo storageInfo = 2;
+  /* IP of worker RPC service.
+     This is initial message sent to scheduler by worker, thus worker does not know `mid` part of worker ID. 
+     This field, combined with `port` field helps scheduler to identify wid of the worker.
+     Worker ID is returned back as a part of response message. */
   string ip = 3;
+  /* Port number of worker RPC service. */
+  int32 port = 4;
 }
 
 message SchedulerHello {
+  /* Machine ID part of worker ID, resolved from `ip` and `port` of `WorkerHello`. */
   int32 mid = 1;
+  /* Mapping from machine ID to network address of replicator. */
+  map<int32, NetAddrMsg> replicatorAddrs = 2;
 }
 
 message HaltRequest {
   WidMsg source = 1 [(scalapb.field).no_box = true];
   JobSystemError err = 2 [(scalapb.field).no_box = true];
+}
+
+message NotifyUpRequest {
+  /* machine ID part of sender's worker ID. */
+  int32 mid = 1;
+  /* worker thread ID part of sender's worker ID. */
+  int32 wtid = 2;
 }

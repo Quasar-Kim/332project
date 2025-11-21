@@ -15,7 +15,7 @@ lazy val commonSettings = Seq(
   scalafmtOnCompile := true,
   libraryDependencies ++= deps,
   Compile / run / fork := true,
-  scalacOptions ++= Seq("-feature", "-language:reflectiveCalls")
+  scalacOptions ++= Seq("-feature", "-language:reflectiveCalls", "-Werror")
 )
 
 lazy val jobs = (project in file("jobs"))
