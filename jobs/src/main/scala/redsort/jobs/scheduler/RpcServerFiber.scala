@@ -31,10 +31,7 @@ object SchedulerRpcService {
       override def notifyUp(request: Empty, meta: Metadata): IO[Empty] = IO.pure(new Empty())
 
       override def registerWorker(hello: WorkerHello, meta: Metadata): IO[SchedulerHello] = for {
-        wid <- IO.pure({
-          val mid = workerAddrs.find(_._2.ip == hello.ip).get._1.mid
-          new Wid(mid, hello.wtid)
-        })
+        wid <- IO.pure(resolveWidFromNetAddr(workerAddrs, new NetAddr(hello.ip, hello.port)))
         _ <- schedulerFiberQueue.offer(new SchedulerFiberEvents.WorkerRegistration(hello, wid))
       } yield {
         new SchedulerHello(
@@ -42,6 +39,10 @@ object SchedulerRpcService {
         )
       }
     }
+
+  def resolveWidFromNetAddr(workerAddrs: Map[Wid, NetAddr], netAddr: NetAddr): Wid =
+    workerAddrs.find { case (_, addr) => addr == netAddr }.get._1
+
 }
 
 object RpcServerFiber {
