@@ -13,6 +13,7 @@ import cats.effect.std.Supervisor
 import redsort.jobs.messages.WorkerHello
 import redsort.jobs.messages.SchedulerHello
 import redsort.jobs.messages.JobSystemError
+import redsort.jobs.messages.NetAddrMsg
 import scala.concurrent.duration._
 import redsort.jobs.messages.HaltRequest
 
@@ -55,7 +56,8 @@ class RpcServerFiberSpec extends FlatSpecBase {
     val workerHello = new WorkerHello(
       wtid = 0,
       storageInfo = None,
-      ip = "1.1.1.2"
+      ip = "1.1.1.2",
+      port = 5000
     )
   }
 
@@ -88,6 +90,12 @@ class RpcServerFiberSpec extends FlatSpecBase {
           schedulerHello <- grpc.registerWorker(f.workerHello, f.metadata)
         } yield {
           schedulerHello.mid should equal(f.wid.mid)
+          schedulerHello.replicatorAddrs should equal(
+            Map(
+              0 -> new NetAddrMsg("1.1.1.1", 4999),
+              1 -> new NetAddrMsg("1.1.1.2", 4999)
+            )
+          )
         }
       }
       .timeout(1.seconds)

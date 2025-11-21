@@ -35,13 +35,19 @@ object SchedulerRpcService {
         _ <- schedulerFiberQueue.offer(new SchedulerFiberEvents.WorkerRegistration(hello, wid))
       } yield {
         new SchedulerHello(
-          mid = wid.mid
+          mid = wid.mid,
+          replicatorAddrs = resolveReplicatorNetAddrs(workerAddrs)
         )
       }
     }
 
   def resolveWidFromNetAddr(workerAddrs: Map[Wid, NetAddr], netAddr: NetAddr): Wid =
     workerAddrs.find { case (_, addr) => addr == netAddr }.get._1
+
+  def resolveReplicatorNetAddrs(workerAddrs: Map[Wid, NetAddr]): Map[Int, NetAddrMsg] =
+    workerAddrs.filter { case (wid, _) => wid.wtid == 0 }.map { case (wid, netAddr) =>
+      (wid.mid, new NetAddrMsg(netAddr.ip, netAddr.port - 1))
+    }
 
 }
 

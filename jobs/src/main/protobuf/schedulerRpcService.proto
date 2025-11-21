@@ -39,6 +39,8 @@ message WorkerHello {
 message SchedulerHello {
   /* Machine ID part of worker ID, resolved from `ip` and `port` of `WorkerHello`. */
   int32 mid = 1;
+  /* Mapping from machine ID to network address of replicator. */
+  map<int32, NetAddrMsg> replicatorAddrs = 2;
 }
 
 message HaltRequest {

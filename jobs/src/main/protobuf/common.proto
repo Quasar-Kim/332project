@@ -9,3 +9,9 @@ message WidMsg {
   int32 mid = 1;
   int32 wtid = 2;
 }
+
+/* Message version of NetAddr(). */
+message NetAddrMsg {
+  string ip = 1;
+  int32 port = 2;
+}
