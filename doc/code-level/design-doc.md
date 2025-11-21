@@ -137,6 +137,13 @@ enum SchedulerFiberEvents {
   // Halt RPC method has been called.
   // Cancel RPC clients and server fibers and raise error.
   Halt(err: JobSystemError, from: Wid)
+
+	// Helps accurate worker status tracking even in case where
+	// scheduler receives status-related message in following order:
+	//   1. WorkerHello
+	//   2. WorkerNotResponding (or other fault detecting messages)
+	// In this case, heartbeat will eventually change worker status to UP.
+	Heartbeat(from: Wid)
   
   // sent by RPC client fiber:
   
@@ -209,6 +216,9 @@ Upon start, scheduler fiber runs as follows:
         1. If true, then go to *handleFault*.
         2. If false, then go to *raiseError*.
 		7. if `msg` is `JobFailed`, go to *raiseError*.
+		8. if `msg` is `Heartbeat`:
+				1. Change status of worker to UP.
+				2. Send `WorkerUp` to RPC client of the worker.
 3. Go back to 1.
 
 *raiseError*:
@@ -218,7 +228,7 @@ Upon start, scheduler fiber runs as follows:
 
 *handleFault*:
 
-1. Change status of faulting worker to DOWN.
+1. Change status of faulting worker to DOWN. **It is important to NOT change states other than worker status.**
 2. Go to *reschedule*.
 
 *reschedule*:
