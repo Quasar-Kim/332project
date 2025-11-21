@@ -38,7 +38,7 @@ class SchedulerSpec extends FlatSpecBase {
       }))
 
       // start scheduler
-      scheduler <- Scheduler(workers, ctxStub, SimpleScheduleLogic)
+      scheduler <- Scheduler(5000, workers, ctxStub, SimpleScheduleLogic)
 
       // get intercepted server implementation
       grpc <- Resource.eval(grpcDeferred.get)

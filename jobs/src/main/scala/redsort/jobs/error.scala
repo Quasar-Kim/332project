@@ -1,7 +1,18 @@
+/* Common error (exceptions) data structures. */
+
 package redsort.jobs
 
 import redsort.jobs.messages.JobSystemError
 
+/** General exception that can be sent to another machine or component.
+  *
+  * @param message
+  *   a error message.
+  * @param source
+  *   component or worker that cause the error.
+  * @param cause
+  *   set in case of exception is caused by another exception.
+  */
 final case class JobSystemException(
     message: String = "",
     source: String = "(unknown)",
@@ -24,6 +35,7 @@ object JobSystemException {
     )
 }
 
+/* Unreachable expression. Shoud NEVER happen. */
 final case class Unreachable(
     message: String = "unreachable expression",
     cause: Throwable = None.orNull

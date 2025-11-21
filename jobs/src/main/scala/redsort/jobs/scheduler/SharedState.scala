@@ -18,10 +18,6 @@ import com.google.protobuf.any
   *   map of states, each owned by respective RPC client fibers.
   * @param rpcServerFiber
   *   states owned by RPC server fiber.
-  * @param schedulerFiberQueue
-  *   event queue of scheduler fiber.
-  * @param rpcClientFiberQueues:
-  *   map of RPC client fibers' event queue.
   */
 final case class SharedState(
     schedulerFiber: SchedulerFiberState,
@@ -47,6 +43,8 @@ object SharedState {
 
 /** States owned by scheduler fiber.
   *
+  * @param state
+  *   state of scheduler automata.
   * @param workers
   *   states of each workers.
   * @param files
@@ -66,7 +64,7 @@ object SchedulerFiberState {
   )
 }
 
-/** Enum indicating state of scheduler.
+/** Enum indicating state of scheduler automata.
   */
 sealed abstract class SchedulerState
 object SchedulerState {
@@ -79,8 +77,8 @@ object SchedulerState {
   *
   * @param wid
   *   worker ID.
-  * @param files
-  *   map of files available on this worker's machine.
+  * @param netAddr
+  *   network address of worker.
   * @param status
   *   availability of worker.
   * @param pendingJobs
@@ -89,6 +87,8 @@ object SchedulerState {
   *   a job in running state.
   * @param completedJobs
   *   queue of jobs in completed state.
+  * @param initialized
+  *   indicate whether worker called RegisterWorker() RPC method.
   */
 final case class WorkerState(
     wid: Wid,
@@ -128,6 +128,8 @@ object WorkerStatus {
   *   remaining retry counts.
   * @param spec
   *   job specification.
+  * @param result
+  *   execution result, only available for completed jobs.
   */
 final case class Job(
     state: JobState,
@@ -155,8 +157,6 @@ object JobState {
   *   list of files required by job.
   * @param outputs
   *   list of files created by job.
-  * @param outputSize
-  *   estimated size of all output files.
   */
 final case class JobSpec(
     name: String,
@@ -195,6 +195,8 @@ object RpcServerFiberState {
   def init = new RpcServerFiberState
 }
 
+/** Events that scheduler fiber receives.
+  */
 sealed abstract class SchedulerFiberEvents
 object SchedulerFiberEvents {
   // == sent by `runJobs`:
@@ -209,6 +211,11 @@ object SchedulerFiberEvents {
   // == sent by RPC server fiber:
 
   /** WorkerHello RPC method has been called with argument `hello`.
+    *
+    * @param hello
+    *   hello message sent by worker.
+    * @param from
+    *   sender of worker hello.
     */
   final case class WorkerRegistration(hello: msg.WorkerHello, from: Wid)
       extends SchedulerFiberEvents
@@ -216,24 +223,58 @@ object SchedulerFiberEvents {
   /** Worker did not called Heartbeat RPC method in timeout.
     *
     * @param from
+    *   worker that timed out.
     */
   final case class HeartbeatTimeout(from: Wid) extends SchedulerFiberEvents
 
   /** Worker requested system halt.
+    *
+    * @param err
+    *   error detail.
+    * @param from
+    *   worker that requested system halt.
     */
   final case class Halt(err: msg.JobSystemError, from: Wid) extends SchedulerFiberEvents
 
   // == sent by RPC client fiber:
 
+  /** A job was completed without fatal error.
+    *
+    * @param result
+    *   job execution result.
+    * @param from
+    *   worker that has run the job.
+    */
   final case class JobCompleted(result: msg.JobResult, from: Wid) extends SchedulerFiberEvents
+
+  /** A job failed to run, due to wrong job specification or machine fault.
+    *
+    * @param result
+    *   job execution result.
+    * @param from
+    *   worker that has run the job.
+    */
   final case class JobFailed(result: msg.JobResult, from: Wid) extends SchedulerFiberEvents
+
+  /** Cannot send RPC request to a worker.
+    *
+    * @param from
+    *   ID of worker that is not responding.
+    */
   final case class WorkerNotResponding(from: Wid) extends SchedulerFiberEvents
 
   // == can be sent by anyone:
 
+  /** Some component of scheduler system failed.
+    *
+    * @param error
+    *   an error.
+    */
   final case class FatalError(error: Throwable) extends SchedulerFiberEvents
 }
 
+/** Events that worker RPC client fibers receive.
+  */
 sealed abstract class WorkerFiberEvents
 object WorkerFiberEvents {
   final case class Job(spec: JobSpec) extends WorkerFiberEvents
@@ -241,6 +282,8 @@ object WorkerFiberEvents {
   final case object WorkerUp extends WorkerFiberEvents
 }
 
+/** Events that main fiber (where `Scheduler` object is) receives.
+  */
 sealed abstract class MainFiberEvents
 object MainFiberEvents {
   final case object Initialized extends MainFiberEvents

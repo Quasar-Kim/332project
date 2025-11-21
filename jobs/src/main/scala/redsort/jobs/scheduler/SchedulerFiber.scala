@@ -17,6 +17,8 @@ import redsort.jobs.scheduler.SchedulerFiberEvents.JobCompleted
 import redsort.jobs.messages.JobResult
 import redsort.jobs.scheduler.SchedulerFiberEvents.JobFailed
 
+/** Scheduler fiber.
+  */
 object SchedulerFiber {
   def start(
       stateR: Ref[IO, SharedState],

@@ -1,3 +1,5 @@
+/* Collection of common data structures and types. */
+
 package redsort.jobs
 
 import cats._
@@ -67,6 +69,7 @@ object Common {
       )
   }
 
+  /* Cats IO version of assert(). */
   def assertIO(pred: Boolean, msg: String = "IO assertion failure") =
     IO.raiseWhen(pred)(new AssertionError(msg))
 }

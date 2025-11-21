@@ -14,7 +14,22 @@ import redsort.jobs.context.interface.SchedulerRpcServer
 import redsort.jobs.Common._
 import redsort.jobs.scheduler
 
+/* Implementation of scheduler RPC service. */
 object SchedulerRpcService {
+
+  /** Return a new object that implements `SchedulerFs2Grpc` trait.
+    *
+    * @param stateR
+    *   reference to shared state.
+    * @param schedulerFiberQueue
+    *   input queue of scheduler fiber.
+    * @param ctx
+    *   context object that provide server on which RPC server runs.
+    * @param workerAddrs
+    *   map of worker network addresses.
+    * @return
+    *   a new `SchedulerFs2Grpc` object.
+    */
   def init(
       stateR: Ref[IO, SharedState],
       schedulerFiberQueue: Queue[IO, SchedulerFiberEvents],
@@ -51,7 +66,24 @@ object SchedulerRpcService {
 
 }
 
+/* Fiber serving scheduler RPC service. */
 object RpcServerFiber {
+
+  /** Start a RPC server.
+    *
+    * @param port
+    *   server port.
+    * @param stateR
+    *   reference to shared states.
+    * @param schedulerFiberQueue
+    *   input queue of scheduler fiber.
+    * @param ctx
+    *   map of worker network addresses.
+    * @param workerAddrs
+    *   map of worker network addresses.
+    * @return
+    *   `Resource` wrapping a RPC server.
+    */
   def start(
       port: Int,
       stateR: Ref[IO, SharedState],
