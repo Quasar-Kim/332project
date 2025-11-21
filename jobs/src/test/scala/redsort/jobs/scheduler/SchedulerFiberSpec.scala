@@ -1,6 +1,6 @@
 package redsort.jobs.scheduler
 
-import redsort.FlatSpecBase
+import redsort.AsyncSpec
 import redsort.jobs.Common._
 import cats._
 import cats.effect._
@@ -18,7 +18,7 @@ import redsort.jobs.Unreachable
 import redsort.jobs.messages.WorkerError
 import redsort.jobs.messages.WorkerErrorKind
 
-class SchedulerFiberSpec extends FlatSpecBase {
+class SchedulerFiberSpec extends AsyncSpec {
   def fixture = new {
     val workerAddrs = Map(
       new Wid(0, 0) -> new NetAddr("1.1.1.1", 5000),
