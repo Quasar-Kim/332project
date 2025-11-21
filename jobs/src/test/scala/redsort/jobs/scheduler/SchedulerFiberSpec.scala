@@ -15,6 +15,8 @@ import redsort.jobs.messages.JobSystemError
 import monocle.syntax.all._
 import redsort.jobs.messages.JobResult
 import redsort.jobs.Unreachable
+import redsort.jobs.messages.WorkerError
+import redsort.jobs.messages.WorkerErrorKind
 
 class SchedulerFiberSpec extends FlatSpecBase {
   def fixture = new {
@@ -207,7 +209,7 @@ class SchedulerFiberSpec extends FlatSpecBase {
           evt <- mainFiberQueue.take
         } yield {
           inside(evt) {
-            case MainFiberEvents.JobFailed(JobSystemException(message, source, cause)) =>
+            case MainFiberEvents.SystemException(JobSystemException(message, source, cause)) =>
               cause should be(None.orNull)
               source should be("<worker 1,0>")
           }
@@ -228,7 +230,7 @@ class SchedulerFiberSpec extends FlatSpecBase {
           _ <- schedulerFiberQueue.offer(new SchedulerFiberEvents.FatalError(err))
           evt <- mainFiberQueue.take
         } yield {
-          inside(evt) { case MainFiberEvents.JobFailed(e) =>
+          inside(evt) { case MainFiberEvents.SystemException(e) =>
             e shouldEqual (err)
           }
         }
@@ -273,7 +275,7 @@ class SchedulerFiberSpec extends FlatSpecBase {
           _ <- schedulerFiberQueue.offer(new SchedulerFiberEvents.Jobs(jobSpecs))
           evt <- mainFiberQueue.take
         } yield {
-          evt shouldBe a[MainFiberEvents.JobFailed]
+          evt shouldBe a[MainFiberEvents.SystemException]
         }
       }
       .timeout(1.second)
@@ -378,7 +380,53 @@ class SchedulerFiberSpec extends FlatSpecBase {
 
   behavior of "SchedulerFiber (upon receiving JobFailed)"
 
-  it should "raise received error"
+  it should "raise received error" in {
+    val f = fixture
+    val result = new JobResult(
+      success = false,
+      retval = None,
+      error = Some(
+        new WorkerError(
+          kind = WorkerErrorKind.BODY_ERROR,
+          inner = Some(
+            new JobSystemError(
+              message = "some error",
+              cause = None
+            )
+          )
+        )
+      ),
+      stats = None
+    )
+    val wid = new Wid(0, 0)
+
+    f.startSchedulerFiber
+      .use { case (stateR, mainFiberQueue, schedulerFiberQueue, rpcClientFiberQueues) =>
+        for {
+          _ <- f.initAll(stateR, mainFiberQueue, schedulerFiberQueue)
+
+          // schedule four jobs, each scheduled to each workers
+          _ <- schedulerFiberQueue.offer(new SchedulerFiberEvents.Jobs(jobSpecs :+ jobSpecE))
+          a <- rpcClientFiberQueues(new Wid(0, 0)).take
+          b <- rpcClientFiberQueues(new Wid(0, 1)).take
+          c <- rpcClientFiberQueues(new Wid(1, 0)).take
+          d <- rpcClientFiberQueues(new Wid(1, 1)).take
+
+          // enqueue JobFailed event
+          _ <- schedulerFiberQueue.offer(new SchedulerFiberEvents.JobFailed(result, wid))
+          evt <- mainFiberQueue.take
+        } yield {
+          evt match {
+            case MainFiberEvents.JobFailed(spec, result) => {
+              spec should be(jobSpecA)
+              result should be(result)
+            }
+            case _ => fail("evt is not Job")
+          }
+        }
+      }
+      .timeout(1.second)
+  }
 
   // behavior of "SchedulerFiber (upon receiving WorkerNotResponding)"
 

@@ -15,6 +15,7 @@ import redsort.jobs.scheduler.SchedulerFiberEvents.Jobs
 import redsort.jobs.Unreachable
 import redsort.jobs.scheduler.SchedulerFiberEvents.JobCompleted
 import redsort.jobs.messages.JobResult
+import redsort.jobs.scheduler.SchedulerFiberEvents.JobFailed
 
 object SchedulerFiber {
   def start(
@@ -87,14 +88,14 @@ object SchedulerFiber {
       for {
         exception <- IO.pure(JobSystemException.fromMsg(errMsg, from.toString()))
         _ <- mainFiberQueue.offer(
-          new MainFiberEvents.JobFailed(exception)
+          new MainFiberEvents.SystemException(exception)
         )
       } yield ()
 
     case FatalError(error) =>
       for {
         _ <- mainFiberQueue.offer(
-          new MainFiberEvents.JobFailed(error)
+          new MainFiberEvents.SystemException(error)
         )
       } yield ()
 
@@ -102,7 +103,7 @@ object SchedulerFiber {
       stateR.get.flatMap { state =>
         if (state.schedulerFiber.state != SchedulerState.Idle) {
           mainFiberQueue.offer(
-            new MainFiberEvents.JobFailed(
+            new MainFiberEvents.SystemException(
               new IllegalStateException(
                 s"Scheduler cannot accept jobs in state other than `Idle`. Current state: ${state.schedulerFiber.state}"
               )
@@ -133,7 +134,7 @@ object SchedulerFiber {
       stateR.get.flatMap { state =>
         if (state.schedulerFiber.state != SchedulerState.Running) {
           mainFiberQueue.offer(
-            new MainFiberEvents.JobFailed(
+            new MainFiberEvents.SystemException(
               new IllegalStateException(
                 s"Scheduler got `JobCompleted` event which is only valid in state `Runninig`. Current state: ${state.schedulerFiber.state}"
               )
@@ -195,6 +196,13 @@ object SchedulerFiber {
           } yield ()
         }
       }
+
+    case JobFailed(result, from) => {
+      for {
+        spec <- stateR.get.map(_.schedulerFiber.workers(from).runningJob.get.spec)
+        _ <- mainFiberQueue.offer(new MainFiberEvents.JobFailed(spec = spec, result = result))
+      } yield ()
+    }
 
     case _ => IO.raiseError(new NotImplementedError)
   }
