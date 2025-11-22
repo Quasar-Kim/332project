@@ -7,6 +7,8 @@ ThisBuild / organization := "org.postech.csed332_25.red"
 // Scalatest recommends turning this off since it implmenets its own
 // buffering algorithm.
 Test / logBuffered := false
+// reprint all errors at the bottom of the test suite run.
+Test / testOptions += Tests.Argument("-oG")
 
 // Required by artima supersafe plugin, which comes with sclatest
 ThisBuild / resolvers += "Artima Maven Repository" at "https://repo.artima.com/releases"
