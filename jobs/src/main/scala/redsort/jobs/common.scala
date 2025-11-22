@@ -51,7 +51,7 @@ object Common {
     * @param replicas
     *   sequence of machines on which this file is replicated to.
     */
-  final case class FileEntry(path: String, size: Int, replicas: Seq[Mid])
+  final case class FileEntry(path: String, size: Long, replicas: Seq[Mid])
 
   object FileEntry {
     def toMsg(entry: FileEntry): FileEntryMsg =
