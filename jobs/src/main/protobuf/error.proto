@@ -4,8 +4,6 @@ syntax = "proto3";
 
 package redsort.jobs.messages;
 
-import "google/protobuf/any.proto";
-
 /* An error that happened somewhere in the job system. 
    Note that this message serves only debugging purpose and intentailly does not provide
    method to investigate details (e.g. pattern matching error kind). */
@@ -15,6 +13,6 @@ message JobSystemError {
   /* optional chanin of error. */
   optional JobSystemError cause = 2;
   /* arbitrary informations that might be helpful for debugging. */
-  map<string, google.protobuf.Any> context = 3;
+  map<string, string> context = 3;
 }
 

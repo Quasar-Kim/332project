@@ -23,7 +23,7 @@ message JobResult {
   /* Indicates whether job completed without error. */
   bool success = 1;
   /* Value returned by body function. */
-  google.protobuf.Any retval = 2;
+  optional bytes retval = 2;
   /* Error that happened during job execution.
      NOTE: error of kind `OUTPUT_REPLICATION_ERROR` can be present here even though job succeeded. 
            Output replication error is treated as nonfatal error. It will be handled by scheduler. */
