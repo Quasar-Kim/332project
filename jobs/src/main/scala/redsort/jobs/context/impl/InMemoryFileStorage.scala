@@ -1,13 +1,15 @@
-package redsort.jobs.worker.filestorage
+package redsort.jobs.context.impl
 
 import cats._
 import cats.effect._
 import cats.syntax._
 import fs2.{Stream, Pipe, Chunk}
+import redsort.jobs.context.interface.FileStorage
 
 import java.io.FileNotFoundException
+import redsort.jobs.Common.FileEntry
 
-class InMemoryFileStorage(ref: Ref[IO, Map[String, Array[Byte]]]) extends FileStorage[AppContext] {
+class InMemoryFileStorage(ref: Ref[IO, Map[String, Array[Byte]]]) extends FileStorage {
   override def read(path: String): Stream[IO, Byte] = {
     Stream
       .eval(ref.get.map(_.get(path)))
@@ -26,12 +28,15 @@ class InMemoryFileStorage(ref: Ref[IO, Map[String, Array[Byte]]]) extends FileSt
         }
     }
   }
+
   override def delete(path: String): IO[Unit] = {
     ref.update(fs => fs - path)
   }
+
   override def exists(path: String): IO[Boolean] = {
     ref.get.map(_.contains(path))
   }
+
   override def rename(before: String, after: String): IO[Unit] = {
     val action = ref.modify { fs =>
       fs.get(before) match {
@@ -47,12 +52,23 @@ class InMemoryFileStorage(ref: Ref[IO, Map[String, Array[Byte]]]) extends FileSt
       case Left(e)  => IO.raiseError(e)
     }
   }
-  override def list(path: String): Stream[IO, String] = {
-    Stream.eval(ref.get).flatMap { fs =>
-      val files = fs.keys.filter(_.startsWith(path)).toSeq
-      Stream.emits(files)
-    }
+
+  override def list(path: String): IO[Map[String, FileEntry]] = {
+    Stream
+      .eval(ref.get)
+      .flatMap { fs =>
+        val files = fs.keys.filter(_.startsWith(path)).toSeq
+        Stream.emits(files)
+      }
+      .evalMap { pathStr =>
+        fileSize(pathStr).map { size =>
+          (pathStr -> new FileEntry(path = pathStr, size = size, replicas = Seq()))
+        }
+      }
+      .compile
+      .to(Map)
   }
+
   override def fileSize(path: String): IO[Long] = {
     ref.get.flatMap { fs =>
       fs.get(path) match {
@@ -60,16 +76,5 @@ class InMemoryFileStorage(ref: Ref[IO, Map[String, Array[Byte]]]) extends FileSt
         case None        => IO.raiseError(new FileNotFoundException(s"File not found: $path"))
       }
     }
-  }
-  override def readAll(path: String): IO[Array[Byte]] = {
-    ref.get.flatMap { fs =>
-      fs.get(path) match {
-        case Some(bytes) => IO.pure(bytes)
-        case None        => IO.raiseError(new FileNotFoundException(s"File not found: $path"))
-      }
-    }
-  }
-  override def writeAll(path: String, data: Array[Byte]): IO[Unit] = {
-    ref.update(fs => fs + (path -> data))
   }
 }

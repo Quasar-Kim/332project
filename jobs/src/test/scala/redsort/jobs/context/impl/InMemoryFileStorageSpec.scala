@@ -1,31 +1,29 @@
 package redsort
 
-import redsort.jobs.worker.filestorage.LocalFileStorage
+import redsort.jobs.context.SchedulerCtx
+import org.scalamock.stubs.CatsEffectStubs
+import scala.concurrent.duration._
+
+import redsort.jobs.context.impl.InMemoryFileStorage
 import cats.effect._
-import cats.effect.testing.scalatest.AsyncIOSpec
-import org.scalatest.flatspec.AsyncFlatSpec
-import org.scalatest.matchers.should.Matchers
 import fs2._
-import fs2.io.file.{Files, Path}
 import java.io.FileNotFoundException
 
-class LocalFileStorageSpec extends AsyncFlatSpec with AsyncIOSpec with Matchers {
+class InMemoryFileStorageSpec extends AsyncSpec {
 
-  def withStorage(testCode: (LocalFileStorage, String) => IO[Unit]): IO[Unit] = {
-    val storage = new LocalFileStorage()
-
-    Files[IO]
-      .tempDirectory(Some(Path("/tmp")), "redsort-test-", None)
-      .use { tempPath =>
-        testCode(storage, tempPath.absolute.toString)
-      }
+  def withStorage(testCode: InMemoryFileStorage => IO[Unit]) = {
+    for {
+      ref <- Ref.of[IO, Map[String, Array[Byte]]](Map.empty)
+      storage = new InMemoryFileStorage(ref)
+      _ <- testCode(storage)
+    } yield ()
   }
 
-  "LocalFileStorage" should "write and read a file correctly using streams" in {
+  "InMemoryFileStorage" should "write and read a file correctly using streams" in {
+    val path = "/tmp/test/stream.txt"
     val content = "Hello World!".getBytes
 
-    withStorage { (storage, root) =>
-      val path = s"$root/stream.txt"
+    withStorage { storage =>
       for {
         _ <- Stream.emits(content).through(storage.write(path)).compile.drain
         readBytes <- storage.read(path).compile.to(Array)
@@ -36,10 +34,10 @@ class LocalFileStorageSpec extends AsyncFlatSpec with AsyncIOSpec with Matchers 
   }
 
   it should "write and read a file correctly using readAll and writeAll" in {
+    val path = "/tmp/test/all.txt"
     val content = "Hello World!".getBytes
 
-    withStorage { (storage, root) =>
-      val path = s"$root/all.txt"
+    withStorage { storage =>
       for {
         _ <- storage.writeAll(path, content)
         readBytes <- storage.readAll(path)
@@ -50,10 +48,10 @@ class LocalFileStorageSpec extends AsyncFlatSpec with AsyncIOSpec with Matchers 
   }
 
   it should "check existence of files correctly" in {
+    val path = "/tmp/test/exist.txt"
     val content = "Hello World!".getBytes
 
-    withStorage { (storage, root) =>
-      val path = s"$root/exist.txt"
+    withStorage { storage =>
       for {
         existsBefore <- storage.exists(path)
         _ <- storage.writeAll(path, content)
@@ -66,10 +64,10 @@ class LocalFileStorageSpec extends AsyncFlatSpec with AsyncIOSpec with Matchers 
   }
 
   it should "delete a file correctly" in {
+    val path = "/tmp/test/delete.txt"
     val content = "Hello World!".getBytes
 
-    withStorage { (storage, root) =>
-      val path = s"$root/delete.txt"
+    withStorage { storage =>
       for {
         _ <- storage.writeAll(path, content)
         existsBefore <- storage.exists(path)
@@ -83,11 +81,11 @@ class LocalFileStorageSpec extends AsyncFlatSpec with AsyncIOSpec with Matchers 
   }
 
   it should "rename a file correctly" in {
+    val beforePath = "/tmp/test/before.txt"
+    val afterPath = "/tmp/test/after.txt"
     val content = "Hello World!".getBytes
 
-    withStorage { (storage, root) =>
-      val beforePath = s"$root/before.txt"
-      val afterPath = s"$root/after.txt"
+    withStorage { storage =>
       for {
         _ <- storage.writeAll(beforePath, content)
         _ <- storage.rename(beforePath, afterPath)
@@ -103,43 +101,35 @@ class LocalFileStorageSpec extends AsyncFlatSpec with AsyncIOSpec with Matchers 
   }
 
   it should "fail to rename if source file does not exist" in {
-    withStorage { (storage, root) =>
-      val invalidPath = s"$root/non-existent"
-      val targetPath = s"$root/target"
-
+    withStorage { storage =>
       storage
-        .rename(invalidPath, targetPath)
+        .rename("non-existent", "target")
         .attempt
         .map { result =>
-          result should matchPattern { case Left(_: java.nio.file.NoSuchFileException) => }
+          result should matchPattern { case Left(_: FileNotFoundException) => }
         }
     }
   }
 
   it should "list files with a given prefix" in {
-    withStorage { (storage, root) =>
-      val dir = s"$root/folder"
-      val file1 = s"$root/folder/file1.txt"
-      val file2 = s"$root/folder/file2.txt"
-      val other = s"$root/other/file3.txt"
-
+    withStorage { storage =>
       for {
-        _ <- storage.writeAll(file1, Array.empty)
-        _ <- storage.writeAll(file2, Array.empty)
-        _ <- storage.writeAll(other, Array.empty)
+        _ <- storage.writeAll("/tmp/folder/file1.txt", Array.empty)
+        _ <- storage.writeAll("/tmp/folder/file2.txt", Array.empty)
+        _ <- storage.writeAll("/tmp/other/file3.txt", Array.empty)
 
-        files <- storage.list(dir).compile.toList
+        files <- storage.list("/tmp/folder").map(_.keys.toList)
       } yield {
-        files should contain theSameElementsAs Seq(file1, file2)
+        files should contain theSameElementsAs Seq("/tmp/folder/file1.txt", "/tmp/folder/file2.txt")
       }
     }
   }
 
   it should "return correct file size" in {
+    val path = "/tmp/test/size.txt"
     val content = Array[Byte](1, 2, 3, 4, 5)
 
-    withStorage { (storage, root) =>
-      val path = s"$root/size.txt"
+    withStorage { storage =>
       for {
         _ <- storage.writeAll(path, content)
         size <- storage.fileSize(path)
@@ -150,9 +140,8 @@ class LocalFileStorageSpec extends AsyncFlatSpec with AsyncIOSpec with Matchers 
   }
 
   it should "raise FileNotFoundException when reading non-existent file" in {
-    withStorage { (storage, root) =>
-      val path = s"$root/ghost.txt"
-      storage.read(path).compile.drain.attempt.map { result =>
+    withStorage { storage =>
+      storage.read("/tmp/ghost.txt").compile.drain.attempt.map { result =>
         result should matchPattern { case Left(_: FileNotFoundException) => }
       }
     }
