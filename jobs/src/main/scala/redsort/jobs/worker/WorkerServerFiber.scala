@@ -34,13 +34,14 @@ class WorkerRpcService(
             result <- jobRunner.runJob(request).guarantee(isBusy.set(false))
           } yield result
         } else {
+          // FIXME: worker must call requestHalt() and die instead of returning worker busy in this case
           IO.pure(
             JobResult(
               success = false,
               retval = None,
               error = Some(
                 WorkerError(
-                  kind = WorkerErrorKind.WORKER_BUSY,
+                  kind = WorkerErrorKind.BODY_ERROR,
                   inner = Some(
                     JobSystemError(
                       message = s"Worker is currently busy processing another job."
@@ -55,10 +56,10 @@ class WorkerRpcService(
       }
   }
 
-  override def halt(request: WorkerHaltRequest, ctx: Metadata): IO[Empty] = {
+  // TODO
+  override def halt(request: JobSystemError, ctx: Metadata): IO[Empty] = {
     println(s"[WorkerRpcService] Received halt request")
     IO.never
-    // TODO
   }
 
 }

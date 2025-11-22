@@ -1,15 +1,27 @@
+/* File and storage related messages. */
+
 syntax = "proto3";
 
 package redsort.jobs.messages;
 
+/* Informations related to worker machine's storage. */
 message LocalStorageInfo {
-    optional int32 mid = 1;
-    int32 remainingStorage = 2;
-    map<string, FileEntryMsg> entries = 3;
+    /* Machine ID. 
+       This is optional because this message is sent as a part of WorkerHello and 
+       worker does not know its machine ID at that point.*/
+    optional int32 mid = 1;                     
+    /* Remaining storage in bytes. */
+    int32 remainingStorage = 2;                 
+    /* Map of File entries, indexed by path. */
+    map<string, FileEntryMsg> entries = 3;      
 }
 
+/* A single file entry. */
 message FileEntryMsg {
+    /* Absolute, symbolic path to the file. */
     string path = 1;
+    /* File size in bytes. */
     int32 size = 2;
+    /* List of machiens to which this file is replicated. */
     repeated int32 replicas = 3;
 }

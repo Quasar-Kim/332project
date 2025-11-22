@@ -22,7 +22,6 @@ import org.scalamock.scalatest.MockFactory
 
 import cats.effect.unsafe.implicits.global
 
-
 // TODO(jaehwan): I really cannot understand how to make this mockup testcase.
 // This testcase always fails (not started)
 class WorkerClientFiberSpec extends AnyFlatSpec with Matchers with MockFactory {

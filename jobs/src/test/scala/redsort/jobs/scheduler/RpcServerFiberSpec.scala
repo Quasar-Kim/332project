@@ -1,6 +1,6 @@
 package redsort.jobs.scheduler
 
-import redsort.FlatSpecBase
+import redsort.AsyncSpec
 import redsort.jobs.Common._
 import cats.effect._
 import cats.effect.std.Queue
@@ -13,10 +13,13 @@ import cats.effect.std.Supervisor
 import redsort.jobs.messages.WorkerHello
 import redsort.jobs.messages.SchedulerHello
 import redsort.jobs.messages.JobSystemError
+import redsort.jobs.messages.NetAddrMsg
 import scala.concurrent.duration._
 import redsort.jobs.messages.HaltRequest
+import redsort.jobs.messages.LocalStorageInfo
+import redsort.jobs.messages.FileEntryMsg
 
-class RpcServerFiberSpec extends FlatSpecBase {
+class RpcServerFiberSpec extends AsyncSpec {
   def fixture = new {
     val workerAddrs = Map(
       new Wid(0, 0) -> new NetAddr("1.1.1.1", 5000),
@@ -55,7 +58,8 @@ class RpcServerFiberSpec extends FlatSpecBase {
     val workerHello = new WorkerHello(
       wtid = 0,
       storageInfo = None,
-      ip = "1.1.1.2"
+      ip = "1.1.1.2",
+      port = 5000
     )
   }
 
@@ -70,8 +74,9 @@ class RpcServerFiberSpec extends FlatSpecBase {
           _ <- grpc.registerWorker(f.workerHello, f.metadata)
           event <- schedulerFiberQueue.take
         } yield {
-          inside(event) { case SchedulerFiberEvents.WorkerRegistration(hello) =>
+          inside(event) { case SchedulerFiberEvents.WorkerRegistration(hello, from) =>
             hello should equal(f.workerHello)
+            from should equal(f.wid)
           }
         }
       }
@@ -87,6 +92,12 @@ class RpcServerFiberSpec extends FlatSpecBase {
           schedulerHello <- grpc.registerWorker(f.workerHello, f.metadata)
         } yield {
           schedulerHello.mid should equal(f.wid.mid)
+          schedulerHello.replicatorAddrs should equal(
+            Map(
+              0 -> new NetAddrMsg("1.1.1.1", 4999),
+              1 -> new NetAddrMsg("1.1.1.2", 4999)
+            )
+          )
         }
       }
       .timeout(1.seconds)

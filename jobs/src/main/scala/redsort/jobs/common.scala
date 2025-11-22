@@ -1,5 +1,10 @@
+/* Collection of common data structures and types. */
+
 package redsort.jobs
 
+import cats._
+import cats.effect._
+import cats.syntax.all._
 import redsort.jobs.messages.FileEntryMsg
 import redsort.jobs.messages.WidMsg
 
@@ -12,13 +17,17 @@ object Common {
     * @param wtid
     *   worker thread ID.
     */
-  final case class Wid(mid: Mid, wtid: Wtid)
+  final case class Wid(mid: Mid, wtid: Wtid) {
+    override def toString(): String =
+      s"<worker ${this.mid},${this.wtid}>"
+  }
   object Wid {
     def fromMsg(msg: WidMsg): Wid =
       new Wid(mid = msg.mid, wtid = msg.wtid)
 
     def toMsg(wid: Wid): WidMsg =
       new WidMsg(mid = wid.mid, wtid = wid.wtid)
+
   }
 
   type Mid = Int
@@ -59,4 +68,12 @@ object Common {
         replicas = m.replicas
       )
   }
+
+  /* Cats IO version of assert(). */
+  def assertIO(pred: Boolean, msg: String = "IO assertion failure") =
+    IO.raiseWhen(!pred)(new AssertionError(msg))
+
+  def unreachableIO[A]: IO[A] = IO.raiseError[A](new Unreachable)
+
+  def notImplmenetedIO[A]: IO[A] = IO.raiseError[A](new NotImplementedError)
 }
