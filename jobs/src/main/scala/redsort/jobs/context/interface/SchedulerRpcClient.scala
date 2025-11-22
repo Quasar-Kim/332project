@@ -3,9 +3,10 @@ package redsort.jobs.context.interface
 import cats._
 import cats.effect._
 import cats.syntax._
-import redsort.jobs.messages.WorkerFs2Grpc
+import redsort.jobs.messages.SchedulerFs2Grpc
 import io.grpc.Metadata
+import redsort.jobs.Common.NetAddr
 
 trait SchedulerRpcClient {
-  def schedulerRpcClient(port: Int): Resource[IO, WorkerFs2Grpc[IO, Metadata]]
+  def schedulerRpcClient(addr: NetAddr): Resource[IO, SchedulerFs2Grpc[IO, Metadata]]
 }
