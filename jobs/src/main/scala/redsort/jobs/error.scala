@@ -16,22 +16,37 @@ import redsort.jobs.messages.JobSystemError
 final case class JobSystemException(
     message: String = "",
     source: String = "(unknown)",
-    cause: Throwable = None.orNull
-) extends Exception(message, cause)
+    context: Map[String, String] = Map(),
+    cause: Option[JobSystemException] = None
+) extends Exception(message, null)
 
 object JobSystemException {
   def fromMsg(msg: JobSystemError, source: String = "(unknown)"): JobSystemException =
     new JobSystemException(
-      message = msg.context.size match {
-        case 0 => s"job system exception from $source: ${msg.message}"
-        case _ =>
-          msg.message ++ s"job system exception from $source: ${msg.message} (context: ${msg.context})"
-      },
+      message = msg.message,
       source = source,
+      context = msg.context,
       cause = msg.cause match {
-        case Some(innerMsg) => JobSystemException.fromMsg(innerMsg)
-        case None           => None.orNull
+        case Some(innerMsg) => Some(JobSystemException.fromMsg(innerMsg))
+        case None           => None
       }
+    )
+
+  def toMsg(e: JobSystemException): JobSystemError =
+    new JobSystemError(
+      message = e.message,
+      cause = e.cause match {
+        case Some(err) => Some(JobSystemException.toMsg(err))
+        case None      => None
+      },
+      context = e.context
+    )
+
+  def fromThrowable(t: Throwable): JobSystemException =
+    new JobSystemException(
+      message = t.getMessage(),
+      cause =
+        if (t.getCause() != null) Some(JobSystemException.fromThrowable(t.getCause())) else None
     )
 }
 
