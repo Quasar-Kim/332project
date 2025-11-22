@@ -43,8 +43,10 @@ message WorkerError {
 
 enum WorkerErrorKind {
   INPUT_REPLICATION_ERROR = 0;
-  BODY_ERROR = 1;
-  OUTPUT_REPLICATION_ERROR = 2;
+  JOB_NOT_FOUND = 1;
+  BODY_ERROR = 2;
+  OUTPUT_REPLICATION_ERROR = 3;
+  UNKNOWN = 4;
 }
 
 message JobExecutionStats {
