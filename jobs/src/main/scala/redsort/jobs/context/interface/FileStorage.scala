@@ -117,4 +117,13 @@ trait FileStorage {
         .compile
         .drain
     }
+
+  /** Make a directory.
+    *
+    * @param path
+    *   path to a directory.
+    * @return
+    *   path of a directory.
+    */
+  def mkDir(path: String): IO[String]
 }

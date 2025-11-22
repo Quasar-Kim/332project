@@ -53,4 +53,7 @@ trait ProductionFileStorage extends FileStorage {
 
   def fileSize(path: String): IO[Long] =
     Files[IO].size(Path(path))
+
+  def mkDir(path: String): IO[String] =
+    Files[IO].createDirectory(Path(path)) >> IO.pure(path)
 }

@@ -77,4 +77,7 @@ class InMemoryFileStorage(ref: Ref[IO, Map[String, Array[Byte]]]) extends FileSt
       }
     }
   }
+
+  override def mkDir(path: String): IO[String] =
+    ???
 }
