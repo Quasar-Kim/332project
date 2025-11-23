@@ -7,6 +7,7 @@
 - Implemented core components of `jobs` package: `Scheduler` and `Worker`
 - Adjusted [milestones](/doc/milestone.md) based on feedback from progress presentation
 - Created [github project](https://github.com/users/Quasar-Kim/projects/1) to track progress and partition tasks
+- Job system correctly communicate and run jobs on local network environment
 
 ## Goal of the next week
 
