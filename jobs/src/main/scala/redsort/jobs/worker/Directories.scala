@@ -13,6 +13,19 @@ final case class Directories(
 )
 
 object Directories {
+  def init(
+      inputDirectories: Seq[Path],
+      outputDirectory: Path,
+      workingDirectory: Path
+  ): IO[Directories] =
+    IO.pure(
+      new Directories(
+        inputDirectories = inputDirectories,
+        outputDirectory = outputDirectory,
+        workingDirectory = workingDirectory
+      )
+    )
+
   def ensureDirs(d: Directories, ctx: FileStorage): IO[Unit] =
     for {
       _ <- ensureDir(d.workingDirectory, ctx, create = true)

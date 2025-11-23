@@ -272,8 +272,10 @@ class SchedulerFiberSpec extends AsyncSpec {
           evt <- mainFiberQueue.take
         } yield {
           inside(evt) {
-            case MainFiberEvents.SystemException(JobSystemException(message, source, cause)) =>
-              cause should be(None.orNull)
+            case MainFiberEvents.SystemException(
+                  JobSystemException(message, source, context, cause)
+                ) =>
+              cause should be(None)
               source should be("<worker 1,0>")
           }
         }

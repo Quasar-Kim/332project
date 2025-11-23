@@ -2,7 +2,6 @@ package redsort.jobs.worker
 
 import cats._
 import cats.effect._
-import cats.syntax._
 import cats.syntax.all._
 import redsort.jobs.Common._
 
@@ -13,76 +12,62 @@ import redsort.jobs.messages._
 import com.google.protobuf.empty.Empty
 
 import redsort.jobs.worker.jobrunner._
-import redsort.jobs.worker.filestorage.{FileStorage, AppContext}
+import org.log4s._
+import redsort.jobs.workers.SharedState
+import redsort.jobs.context.WorkerCtx
+import redsort.jobs.scheduler.JobSpec
+import monocle.syntax.all._
+import redsort.jobs.context.interface.FileStorage
+import redsort.jobs.JobSystemException
 
-class WorkerRpcService(
-    isBusy: Ref[IO, Boolean],
-    handlerMap: Map[String, JobSpecMsg => IO[JobResult]],
-    fileStorage: FileStorage[AppContext]
-) extends WorkerFs2Grpc[IO, Metadata] {
-  private val jobRunner = new JobRunner(handlerMap)
-  override def runJob(request: JobSpecMsg, ctx: Metadata): IO[JobResult] = {
-    println(s"[WorkerRpcService] Received job of type ${request.name}")
-    isBusy
-      .modify {
-        case true  => (true, false)
-        case false => (true, true)
-      }
-      .flatMap { canProceed =>
-        if (canProceed) {
-          for {
-            result <- jobRunner.runJob(request).guarantee(isBusy.set(false))
-          } yield result
-        } else {
-          // FIXME: worker must call requestHalt() and die instead of returning worker busy in this case
-          IO.pure(
-            JobResult(
-              success = false,
-              retval = None,
-              error = Some(
-                WorkerError(
-                  kind = WorkerErrorKind.BODY_ERROR,
-                  inner = Some(
-                    JobSystemError(
-                      message = s"Worker is currently busy processing another job."
-                    )
-                  )
-                )
-              ),
-              stats = None
-            )
-          )
-        }
-      }
-  }
+object WorkerRpcService {
+  private[this] val logger = getLogger
 
-  // TODO
-  override def halt(request: JobSystemError, ctx: Metadata): IO[Empty] = {
-    println(s"[WorkerRpcService] Received halt request")
-    IO.never
-  }
+  def init(
+      stateR: Ref[IO, SharedState],
+      jobRunner: JobRunner
+  ): WorkerFs2Grpc[IO, Metadata] =
+    new WorkerFs2Grpc[IO, Metadata] {
+      override def runJob(request: JobSpecMsg, ctx: Metadata): IO[JobResult] =
+        for {
+          spec <- IO.pure(JobSpec.fromMsg(request))
+          _ <- IO(logger.info(s"received job of type ${spec.name}"))
+          result <- tryRunJob(spec)
+        } yield result
 
+      def tryRunJob(spec: JobSpec): IO[JobResult] =
+        for {
+          state <- stateR.get
+          _ <- IO.raiseWhen(state.runningJob)(new IllegalStateException("worker is busy"))
+          result <- jobRunner
+            .runJob(spec)
+            .guarantee(stateR.set(state.focus(_.runningJob).replace(false)))
+        } yield result
+
+      // TODO
+      override def halt(request: JobSystemError, ctx: Metadata): IO[Empty] =
+        IO.raiseError(JobSystemException.fromMsg(request))
+    }
 }
 
 object WorkerServerFiber {
+  private[this] val logger = getLogger
+
   def start(
+      stateR: Ref[IO, SharedState],
       port: Int,
-      handlerMap: Map[String, JobSpecMsg => IO[JobResult]],
-      fileStorage: FileStorage[AppContext]
-  ): IO[Unit] = {
+      handlers: Map[String, JobHandler],
+      dirs: Directories,
+      ctx: WorkerCtx
+  ): Resource[IO, Server] =
     for {
-      busyFlag <- Ref.of[IO, Boolean](false)
-      serviceDefinition = new WorkerRpcService(busyFlag, handlerMap, fileStorage)
-      _ <- WorkerFs2Grpc
-        .bindServiceResource[IO](serviceDefinition)
-        .use { service =>
-          NettyServerBuilder
-            .forPort(port)
-            .addService(service)
-            .resource[IO]
-            .evalMap(server => IO(server.start()))
-            .useForever
-        }
-    } yield ()
-  }
+      _ <- IO(logger.debug("worker RPC server started")).toResource
+      jobRunner <- JobRunner.init(handlers = handlers, dirs = dirs, ctx = ctx).toResource
+      server <- ctx
+        .workerRpcServer(
+          WorkerRpcService.init(stateR = stateR, jobRunner = jobRunner),
+          port
+        )
+        .evalMap(server => IO(server.start()))
+    } yield server
 }

@@ -7,3 +7,4 @@ trait WorkerCtx
     with SchedulerRpcClient
     with ReplicatorLocalRpcClient
     with FileStorage
+    with NetInfo

@@ -7,6 +7,7 @@ import cats.effect._
 import cats.syntax.all._
 import redsort.jobs.messages.FileEntryMsg
 import redsort.jobs.messages.WidMsg
+import redsort.jobs.messages.NetAddrMsg
 
 object Common {
 
@@ -41,6 +42,13 @@ object Common {
     *   port number.
     */
   final case class NetAddr(ip: String, port: Int)
+  object NetAddr {
+    def fromMsg(msg: NetAddrMsg): NetAddr =
+      new NetAddr(ip = msg.ip, port = msg.port)
+
+    def toMsg(addr: NetAddr): NetAddrMsg =
+      new NetAddrMsg(ip = addr.ip, port = addr.port)
+  }
 
   /** A single file entry in one or more workers.
     *
