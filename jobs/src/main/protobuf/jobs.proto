@@ -25,3 +25,7 @@ message StringArg {
 message IntArg {
   int32 value = 1;
 }
+
+message BytesArg {
+  bytes value = 1;
+}

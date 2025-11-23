@@ -15,6 +15,8 @@ import redsort.jobs.scheduler.MainFiberEvents.SystemException
 import redsort.jobs.Unreachable
 import redsort.jobs.SourceLogger
 import redsort.jobs.messages.FileEntryMsg
+import redsort.jobs.JobSystemException
+import redsort.jobs.messages.WorkerErrorKind.BODY_ERROR
 
 /** A frontend of job scheduling system.
   */
@@ -137,7 +139,13 @@ object Scheduler {
                 IO.pure(new JobExecutionResult(results, files))
             case JobFailed(spec, result) =>
               IO.raiseError[JobExecutionResult](
-                new RuntimeException(s"Job execution failed: spec=$spec, result=$result")
+                new RuntimeException(
+                  s"Job execution failed: kind= ${result.error.get.kind}, spec=$spec",
+                  result.error.get.inner match {
+                    case Some(inner) => JobSystemException.fromMsg(inner, source = "worker")
+                    case None        => null
+                  }
+                )
               )
             case SystemException(error) => IO.raiseError[JobExecutionResult](error)
             case _                      => unreachableIO[JobExecutionResult]

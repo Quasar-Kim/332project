@@ -49,7 +49,7 @@ object JobRunner {
           handler <- getHandlerOrRaise(handlers, spec.name).adaptError { case e: Exception =>
             errorToWorkerError(WorkerErrorKind.JOB_NOT_FOUND, e)
           }
-          retval <- handler(spec.args, inputs, outputs, ctx).adaptError { case e: Exception =>
+          retval <- handler(spec.args, inputs, outputs, ctx, dirs).adaptError { case e: Exception =>
             errorToWorkerError(WorkerErrorKind.BODY_ERROR, e)
           }
         } yield {

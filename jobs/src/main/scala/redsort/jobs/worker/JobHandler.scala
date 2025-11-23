@@ -26,6 +26,7 @@ trait JobHandler {
       args: Seq[ProtobufAny],
       inputs: Seq[Path],
       outputs: Seq[Path],
-      ctx: FileStorage
+      ctx: FileStorage,
+      d: Directories
   ): IO[Option[Array[Byte]]]
 }

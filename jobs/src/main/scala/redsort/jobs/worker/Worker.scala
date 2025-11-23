@@ -17,6 +17,7 @@ import io.grpc.Metadata
 import monocle.syntax.all._
 import org.log4s._
 import redsort.jobs.SourceLogger
+import scala.redsort.jobs.worker.handler.SyncJobHandler
 
 trait Worker {
   def waitForComplete: IO[Unit]
@@ -37,6 +38,7 @@ object Worker {
     for {
       // initialize state
       stateR <- SharedState.init.toResource
+      handlerMap <- IO.pure(handlerMap.updated("__sync__", SyncJobHandler)).toResource
 
       // create a temporary directory and use it as a working directory
       workingDirectory <- createWorkingDir(ctx).toResource

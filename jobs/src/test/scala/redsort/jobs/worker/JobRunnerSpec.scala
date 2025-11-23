@@ -77,7 +77,7 @@ class JobRunnerSpec extends AsyncSpec {
 
   it should "return successful job request if job succeeds" in {
     val f = fixture
-    (f.handlerStub.apply _).returns { case (args, inputs, outputs, ctx) =>
+    (f.handlerStub.apply _).returns { case (args, inputs, outputs, ctx, dirs) =>
       val parsedArg = args(0).unpack[StringArg].value
       parsedArg should be("hello")
       inputs.map(_.toString) should be(Seq("/root/files/a", "/root/working/files/b"))
@@ -97,7 +97,7 @@ class JobRunnerSpec extends AsyncSpec {
 
   it should "return failed result if body function throws" in {
     val f = fixture
-    (f.handlerStub.apply _).returns { case (args, inputs, outputs, ctx) =>
+    (f.handlerStub.apply _).returns { case (args, inputs, outputs, ctx, dirs) =>
       IO.raiseError(new RuntimeException("catch me"))
     }
 
@@ -112,7 +112,7 @@ class JobRunnerSpec extends AsyncSpec {
 
   it should "return failed result if input file does not exists" in {
     val f = fixture
-    (f.handlerStub.apply _).returns { case (args, inputs, outputs, ctx) =>
+    (f.handlerStub.apply _).returns { case (args, inputs, outputs, ctx, dirs) =>
       IO.raiseError(new RuntimeException("catch me"))
     }
 
