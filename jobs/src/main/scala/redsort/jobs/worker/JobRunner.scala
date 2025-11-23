@@ -18,7 +18,7 @@ import redsort.jobs.SourceLogger
 
 trait JobRunner {
   def addHandler(entry: Tuple2[String, JobHandler]): IO[JobRunner]
-  def runJob(spec: JobSpec): IO[JobResult]
+  def runJob(spec: JobSpecMsg): IO[JobResult]
   def getHandlers: Map[String, JobHandler]
 }
 
@@ -35,17 +35,17 @@ object JobRunner {
       override def addHandler(entry: (String, JobHandler)): IO[JobRunner] =
         JobRunner(handlers + entry, dirs, ctx, logger)
 
-      override def runJob(spec: JobSpec): IO[JobResult] =
+      override def runJob(spec: JobSpecMsg): IO[JobResult] =
         runJobInner(spec).handleErrorWith {
           case WorkerErrorWrapper(err) =>
             IO.pure(new JobResult(success = false, retval = None, error = Some(err), stats = None))
           case _ => unreachableIO
         }
 
-      def runJobInner(spec: JobSpec): IO[JobResult] =
+      def runJobInner(spec: JobSpecMsg): IO[JobResult] =
         for {
-          inputs <- prepareInputs(spec.inputs)
-          outputs <- prepareOuptputs(spec.outputs)
+          inputs <- prepareInputs(spec.inputs.map(FileEntry.fromMsg(_)))
+          outputs <- prepareOuptputs(spec.outputs.map(FileEntry.fromMsg(_)))
           handler <- getHandlerOrRaise(handlers, spec.name).adaptError { case e: Exception =>
             errorToWorkerError(WorkerErrorKind.JOB_NOT_FOUND, e)
           }

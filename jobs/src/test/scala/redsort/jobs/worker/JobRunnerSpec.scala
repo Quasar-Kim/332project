@@ -36,26 +36,28 @@ class JobRunnerSpec extends AsyncSpec {
       logger = new SourceLogger(getLogger)
     )
 
-    val helloSpec = new JobSpec(
-      name = "hello",
-      args = Seq("hello"),
-      inputs = Seq(
-        new FileEntry(
-          path = "@{input}/root/files/a",
-          size = 1024,
-          replicas = Seq(0)
+    val helloSpec = JobSpec.toMsg(
+      new JobSpec(
+        name = "hello",
+        args = Seq(new StringArg("hello")), // hello>?
+        inputs = Seq(
+          new FileEntry(
+            path = "@{input}/root/files/a",
+            size = 1024,
+            replicas = Seq(0)
+          ),
+          new FileEntry(
+            path = "@{working}/files/b",
+            size = 1024,
+            replicas = Seq(0)
+          )
         ),
-        new FileEntry(
-          path = "@{working}/files/b",
-          size = 1024,
-          replicas = Seq(0)
-        )
-      ),
-      outputs = Seq(
-        new FileEntry(
-          path = "@{output}/files/c",
-          size = 1024,
-          replicas = Seq(0)
+        outputs = Seq(
+          new FileEntry(
+            path = "@{output}/files/c",
+            size = 1024,
+            replicas = Seq(0)
+          )
         )
       )
     )
@@ -76,7 +78,8 @@ class JobRunnerSpec extends AsyncSpec {
   it should "return successful job request if job succeeds" in {
     val f = fixture
     (f.handlerStub.apply _).returns { case (args, inputs, outputs, ctx) =>
-      args should be(Seq("hello"))
+      val parsedArg = args(0).unpack[StringArg].value
+      parsedArg should be("hello")
       inputs.map(_.toString) should be(Seq("/root/files/a", "/root/working/files/b"))
       outputs.map(_.toString) should be(Seq("/root/output/files/c"))
       IO.pure(Some(Array[Byte](192.toByte)))
@@ -124,11 +127,13 @@ class JobRunnerSpec extends AsyncSpec {
 
   it should "return failed result if handler does not exists" in {
     val f = fixture
-    val badSpec = new JobSpec(
-      name = "bad",
-      args = Seq(),
-      inputs = Seq(),
-      outputs = Seq()
+    val badSpec = JobSpec.toMsg(
+      new JobSpec(
+        name = "bad",
+        args = Seq(),
+        inputs = Seq(),
+        outputs = Seq()
+      )
     )
 
     for {

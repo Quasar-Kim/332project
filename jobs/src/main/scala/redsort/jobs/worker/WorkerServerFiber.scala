@@ -28,14 +28,13 @@ object WorkerRpcService {
       logger: SourceLogger
   ): WorkerFs2Grpc[IO, Metadata] =
     new WorkerFs2Grpc[IO, Metadata] {
-      override def runJob(request: JobSpecMsg, ctx: Metadata): IO[JobResult] =
+      override def runJob(spec: JobSpecMsg, ctx: Metadata): IO[JobResult] =
         for {
-          spec <- IO.pure(JobSpec.fromMsg(request))
           _ <- logger.info(s"received job of type ${spec.name}")
           result <- tryRunJob(spec)
         } yield result
 
-      def tryRunJob(spec: JobSpec): IO[JobResult] =
+      def tryRunJob(spec: JobSpecMsg): IO[JobResult] =
         for {
           state <- stateR.get
           _ <- IO.raiseWhen(state.runningJob)(new IllegalStateException("worker is busy"))

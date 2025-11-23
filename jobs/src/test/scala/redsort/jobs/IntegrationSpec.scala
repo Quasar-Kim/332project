@@ -29,6 +29,7 @@ import redsort.jobs.context.interface.NetInfo
 import redsort.jobs.worker.JobHandler
 import redsort.jobs.context.interface.FileStorage
 import redsort.jobs.scheduler.JobSpec
+import com.google.protobuf.any
 
 object SchedulerTestCtx
     extends SchedulerCtx
@@ -50,7 +51,7 @@ class WorkerTestCtx(ref: Ref[IO, Map[String, Array[Byte]]])
 
 object NoopJobHandler extends JobHandler {
   override def apply(
-      args: Seq[Any],
+      args: Seq[any.Any],
       inputs: Seq[Path],
       outputs: Seq[Path],
       ctx: FileStorage

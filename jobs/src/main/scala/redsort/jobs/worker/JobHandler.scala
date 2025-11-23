@@ -3,6 +3,7 @@ package redsort.jobs.worker
 import fs2.io.file.Path
 import redsort.jobs.context.interface.FileStorage
 import cats.effect._
+import com.google.protobuf.any.{Any => ProtobufAny}
 
 /** Job handler.
   */
@@ -22,7 +23,7 @@ trait JobHandler {
     *   Optional return value of type `Array[Byte]`
     */
   def apply(
-      args: Seq[Any],
+      args: Seq[ProtobufAny],
       inputs: Seq[Path],
       outputs: Seq[Path],
       ctx: FileStorage

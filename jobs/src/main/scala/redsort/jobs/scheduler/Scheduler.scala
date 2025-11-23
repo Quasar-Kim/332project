@@ -14,6 +14,7 @@ import redsort.jobs.scheduler.MainFiberEvents.JobFailed
 import redsort.jobs.scheduler.MainFiberEvents.SystemException
 import redsort.jobs.Unreachable
 import redsort.jobs.SourceLogger
+import redsort.jobs.messages.FileEntryMsg
 
 /** A frontend of job scheduling system.
   */
@@ -186,7 +187,12 @@ object Scheduler {
     */
   def syncJobSpecs(files: Map[Int, Map[String, FileEntry]]): Seq[JobSpec] =
     files.toSeq.map { case (mid, entries) =>
-      new JobSpec(name = SYNC_JOB_NAME, args = Seq(entries), inputs = Seq(), outputs = Seq())
+      new JobSpec(
+        name = SYNC_JOB_NAME,
+        args = entries.values.map(FileEntry.toMsg(_)).toSeq,
+        inputs = Seq(),
+        outputs = Seq()
+      )
     }
 
   val SYNC_JOB_NAME = "__sync__"
