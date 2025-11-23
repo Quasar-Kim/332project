@@ -30,6 +30,9 @@ import redsort.jobs.worker.JobHandler
 import redsort.jobs.context.interface.FileStorage
 import redsort.jobs.scheduler.JobSpec
 import com.google.protobuf.any
+import redsort.jobs.worker.Directories
+import redsort.jobs.messages._
+import com.google.protobuf.ByteString
 
 object SchedulerTestCtx
     extends SchedulerCtx
@@ -54,12 +57,36 @@ object NoopJobHandler extends JobHandler {
       args: Seq[any.Any],
       inputs: Seq[Path],
       outputs: Seq[Path],
-      ctx: FileStorage
+      ctx: FileStorage,
+      dirs: Directories
   ): IO[Option[Array[Byte]]] =
     IO.pure(None)
 }
 
-class IntegrationSpec extends AsyncFunSpec with BeforeAndAfterEach {
+object IdentityJobHandler extends JobHandler {
+  override def apply(
+      args: Seq[any.Any],
+      inputs: Seq[Path],
+      outputs: Seq[Path],
+      ctx: FileStorage,
+      d: Directories
+  ): IO[Option[Array[Byte]]] =
+
+    IO.pure(Some(args(0).unpack[BytesArg].value.toByteArray()))
+}
+
+object FaultyJobHandler extends JobHandler {
+  override def apply(
+      args: Seq[any.Any],
+      inputs: Seq[Path],
+      outputs: Seq[Path],
+      ctx: FileStorage,
+      dirs: Directories
+  ): IO[Option[Array[Byte]]] =
+    IO.raiseError(new RuntimeException("handle me"))
+}
+
+class WorkerSchedulerIntegrationSpec extends AsyncFunSpec with BeforeAndAfterEach {
   override val timeLimit = 10.seconds
 
   def fixture = new {
@@ -154,6 +181,69 @@ class IntegrationSpec extends AsyncFunSpec with BeforeAndAfterEach {
       } yield {
         result.results(0)._1 should be(jobSpec)
         result.results(0)._2.success should be(true)
+      }
+      res.use(_ => IO.unit).timeout(10.second)
+    }
+  }
+
+  test("job with args") {
+    val f = fixture
+
+    val handlers = Map("identity" -> IdentityJobHandler)
+    val buffer = ByteString.copyFrom(Array(0xde, 0xad, 0xbe, 0xef).map(_.toByte))
+    val arg = new BytesArg(buffer)
+    val jobSpec = new JobSpec(
+      name = "identity",
+      args = Seq(arg),
+      inputs = Seq(),
+      outputs = Seq()
+    )
+
+    fileLogger("job-with-arg").use { _ =>
+      val res = for {
+        // spawn worker in background
+        supervisor <- Supervisor[IO]
+        _ <- Resource.eval(supervisor.supervise(f.worker(handlers).useForever))
+        scheduler <- f.getScheduler
+        _ <- scheduler.waitInit.toResource
+
+        // run job and get result
+        result <- scheduler.runJobs(Seq(jobSpec)).toResource
+      } yield {
+        result.results(0)._1 should be(jobSpec)
+        result.results(0)._2.success should be(true)
+        result.results(0)._2.retval.get should be(buffer)
+      }
+      res.use(_ => IO.unit).timeout(10.second)
+    }
+  }
+
+  test("failing job execution", NetworkTest) {
+    val f = fixture
+
+    val handlers = Map("faulty" -> FaultyJobHandler)
+    val jobSpec = new JobSpec(
+      name = "faulty",
+      args = Seq(),
+      inputs = Seq(),
+      outputs = Seq()
+    )
+
+    fileLogger("failing-job-execution").use { logger =>
+      val res = for {
+        // spawn worker in background
+        supervisor <- Supervisor[IO]
+        _ <- Resource.eval(supervisor.supervise(f.worker(handlers).useForever))
+        scheduler <- f.getScheduler
+        _ <- scheduler.waitInit.toResource
+
+        // run job "noop" and get result
+        result <- scheduler.runJobs(Seq(jobSpec)).attempt.toResource
+      } yield {
+        result match {
+          case Left(e)  => logger.info(s"got exception: $e")
+          case Right(_) => fail("did not errored")
+        }
       }
       res.use(_ => IO.unit).timeout(10.second)
     }
