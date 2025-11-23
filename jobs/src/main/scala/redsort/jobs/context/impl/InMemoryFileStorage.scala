@@ -8,6 +8,7 @@ import redsort.jobs.context.interface.FileStorage
 
 import java.io.FileNotFoundException
 import redsort.jobs.Common.FileEntry
+import fs2.io.file.FileAlreadyExistsException
 
 class InMemoryFileStorage(ref: Ref[IO, Map[String, Array[Byte]]]) extends FileStorage {
   override def read(path: String): Stream[IO, Byte] = {
@@ -79,5 +80,13 @@ class InMemoryFileStorage(ref: Ref[IO, Map[String, Array[Byte]]]) extends FileSt
   }
 
   override def mkDir(path: String): IO[String] =
-    ???
+    // notion of "directory" does not exists in this implementation
+    ref.get.flatMap { fs =>
+      for {
+        // abort if file with same name exists
+        _ <- IO.raiseWhen(fs.contains(path))(
+          new FileAlreadyExistsException(s"can't create directory because file $path exists")
+        )
+      } yield path
+    }
 }

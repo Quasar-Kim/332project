@@ -1,7 +1,7 @@
 package redsort.jobs.context.impl
 
 import cats.effect._
-import cats.syntax._
+import cats.syntax.all._
 import fs2.grpc.syntax.all._
 import redsort.jobs.messages.SchedulerFs2Grpc
 import io.grpc.netty.shaded.io.grpc.netty.NettyChannelBuilder
@@ -26,17 +26,23 @@ trait ProductionSchedulerRpcClient extends SchedulerRpcClient {
 
   /** Repeatedly try connection for every 1 second until conneciton is established.
     */
-  def awaitConnection(channel: ManagedChannel): IO[Unit] =
-    fs2.Stream
-      .repeatEval(IO(channel.getState(true))) // requests a connection
-      .evalTap(state => IO.println(s"scheduler gRPC state: $state"))
-      .metered(1.second)
-      .filter(_ == ConnectivityState.READY)
-      .take(1)
-      .compile
-      .drain
+  def awaitConnection(channel: ManagedChannel): IO[Unit] = {
+    def waitUntilReady(currentState: ConnectivityState): IO[Unit] =
+      if (currentState == ConnectivityState.READY) IO.unit
+      else
+        for {
+          _ <- IO.async_((cb: Either[Throwable, Unit] => Unit) =>
+            channel.notifyWhenStateChanged(currentState, () => cb(Right(())))
+          )
+          nextState <- IO(channel.getState(true))
+          _ <- waitUntilReady(nextState)
+        } yield ()
+
+    IO(channel.getState(true))
+      .flatMap(waitUntilReady)
       .timeoutTo(
         5.minute,
         IO.raiseError(new RuntimeException("scheduler gRPC connection timed out"))
       )
+  }
 }

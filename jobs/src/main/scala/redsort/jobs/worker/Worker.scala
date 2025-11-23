@@ -16,13 +16,15 @@ import redsort.jobs.context.interface.FileStorage
 import io.grpc.Metadata
 import monocle.syntax.all._
 import org.log4s._
+import redsort.jobs.SourceLogger
+import scala.redsort.jobs.worker.handler.SyncJobHandler
 
 trait Worker {
   def waitForComplete: IO[Unit]
 }
 
 object Worker {
-  private[this] val logger = getLogger
+  private[this] val logger = new SourceLogger(getLogger, "worker")
 
   def apply(
       handlerMap: Map[String, JobHandler],
@@ -36,6 +38,7 @@ object Worker {
     for {
       // initialize state
       stateR <- SharedState.init.toResource
+      handlerMap <- IO.pure(handlerMap.updated("__sync__", SyncJobHandler)).toResource
 
       // create a temporary directory and use it as a working directory
       workingDirectory <- createWorkingDir(ctx).toResource
@@ -57,7 +60,8 @@ object Worker {
               port = port,
               handlers = handlerMap,
               dirs = dirs,
-              ctx = ctx
+              ctx = ctx,
+              logger = logger
             )
             .useForever
         )
@@ -96,7 +100,7 @@ object Worker {
       // build WorkerHello
       storageInfo <- if (wtid == 0) getStorageInfo(dirs, ctx).map(Some(_)) else IO.pure(None)
       ip <- ctx.getIP
-      _ <- IO(logger.info(s"local address $ip"))
+      _ <- logger.info(s"local ip address is $ip")
       workerHello <- IO.pure(
         new WorkerHello(
           wtid = wtid,
@@ -111,7 +115,8 @@ object Worker {
 
       // update state according to SchedulerHello
       wid <- IO.pure(new Wid(schedulerHello.mid, wtid))
-      _ <- IO(logger.info(s"registered, my wid is $wid"))
+      _ <- logger.setSourceId(s"worker ${wid.mid}, ${wid.wtid}")
+      _ <- logger.info(s"registered, my wid is $wid")
       _ <- stateR.update { state =>
         state
           .focus(_.wid)

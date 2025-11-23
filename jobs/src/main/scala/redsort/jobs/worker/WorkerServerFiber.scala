@@ -19,23 +19,22 @@ import redsort.jobs.scheduler.JobSpec
 import monocle.syntax.all._
 import redsort.jobs.context.interface.FileStorage
 import redsort.jobs.JobSystemException
+import redsort.jobs.SourceLogger
 
 object WorkerRpcService {
-  private[this] val logger = getLogger
-
   def init(
       stateR: Ref[IO, SharedState],
-      jobRunner: JobRunner
+      jobRunner: JobRunner,
+      logger: SourceLogger
   ): WorkerFs2Grpc[IO, Metadata] =
     new WorkerFs2Grpc[IO, Metadata] {
-      override def runJob(request: JobSpecMsg, ctx: Metadata): IO[JobResult] =
+      override def runJob(spec: JobSpecMsg, ctx: Metadata): IO[JobResult] =
         for {
-          spec <- IO.pure(JobSpec.fromMsg(request))
-          _ <- IO(logger.info(s"received job of type ${spec.name}"))
+          _ <- logger.info(s"received job of type ${spec.name}")
           result <- tryRunJob(spec)
         } yield result
 
-      def tryRunJob(spec: JobSpec): IO[JobResult] =
+      def tryRunJob(spec: JobSpecMsg): IO[JobResult] =
         for {
           state <- stateR.get
           _ <- IO.raiseWhen(state.runningJob)(new IllegalStateException("worker is busy"))
@@ -51,21 +50,22 @@ object WorkerRpcService {
 }
 
 object WorkerServerFiber {
-  private[this] val logger = getLogger
-
   def start(
       stateR: Ref[IO, SharedState],
       port: Int,
       handlers: Map[String, JobHandler],
       dirs: Directories,
-      ctx: WorkerCtx
+      ctx: WorkerCtx,
+      logger: SourceLogger
   ): Resource[IO, Server] =
     for {
-      _ <- IO(logger.debug("worker RPC server started")).toResource
-      jobRunner <- JobRunner.init(handlers = handlers, dirs = dirs, ctx = ctx).toResource
+      _ <- logger.debug("worker RPC server started").toResource
+      jobRunner <- JobRunner
+        .init(handlers = handlers, dirs = dirs, ctx = ctx, logger = logger)
+        .toResource
       server <- ctx
         .workerRpcServer(
-          WorkerRpcService.init(stateR = stateR, jobRunner = jobRunner),
+          WorkerRpcService.init(stateR = stateR, jobRunner = jobRunner, logger = logger),
           port
         )
         .evalMap(server => IO(server.start()))

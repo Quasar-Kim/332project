@@ -14,6 +14,8 @@ import redsort.jobs.Common.FileEntry
 import redsort.jobs.messages._
 import com.google.protobuf.any.{Any => ProtobufAny}
 import com.google.protobuf.ByteString
+import redsort.jobs.SourceLogger
+import org.log4s._
 
 class JobRunnerSpec extends AsyncSpec {
   def fixture = new {
@@ -30,29 +32,32 @@ class JobRunnerSpec extends AsyncSpec {
     val getJobRunner = JobRunner(
       handlers = Map("hello" -> handlerStub),
       dirs = dirs,
-      ctx = fileIO
+      ctx = fileIO,
+      logger = new SourceLogger(getLogger)
     )
 
-    val helloSpec = new JobSpec(
-      name = "hello",
-      args = Seq("hello"),
-      inputs = Seq(
-        new FileEntry(
-          path = "@{input}/root/files/a",
-          size = 1024,
-          replicas = Seq(0)
+    val helloSpec = JobSpec.toMsg(
+      new JobSpec(
+        name = "hello",
+        args = Seq(new StringArg("hello")), // hello>?
+        inputs = Seq(
+          new FileEntry(
+            path = "@{input}/root/files/a",
+            size = 1024,
+            replicas = Seq(0)
+          ),
+          new FileEntry(
+            path = "@{working}/files/b",
+            size = 1024,
+            replicas = Seq(0)
+          )
         ),
-        new FileEntry(
-          path = "@{working}/files/b",
-          size = 1024,
-          replicas = Seq(0)
-        )
-      ),
-      outputs = Seq(
-        new FileEntry(
-          path = "@{output}/files/c",
-          size = 1024,
-          replicas = Seq(0)
+        outputs = Seq(
+          new FileEntry(
+            path = "@{output}/files/c",
+            size = 1024,
+            replicas = Seq(0)
+          )
         )
       )
     )
@@ -72,8 +77,9 @@ class JobRunnerSpec extends AsyncSpec {
 
   it should "return successful job request if job succeeds" in {
     val f = fixture
-    (f.handlerStub.apply _).returns { case (args, inputs, outputs, ctx) =>
-      args should be(Seq("hello"))
+    (f.handlerStub.apply _).returns { case (args, inputs, outputs, ctx, dirs) =>
+      val parsedArg = args(0).unpack[StringArg].value
+      parsedArg should be("hello")
       inputs.map(_.toString) should be(Seq("/root/files/a", "/root/working/files/b"))
       outputs.map(_.toString) should be(Seq("/root/output/files/c"))
       IO.pure(Some(Array[Byte](192.toByte)))
@@ -91,7 +97,7 @@ class JobRunnerSpec extends AsyncSpec {
 
   it should "return failed result if body function throws" in {
     val f = fixture
-    (f.handlerStub.apply _).returns { case (args, inputs, outputs, ctx) =>
+    (f.handlerStub.apply _).returns { case (args, inputs, outputs, ctx, dirs) =>
       IO.raiseError(new RuntimeException("catch me"))
     }
 
@@ -106,7 +112,7 @@ class JobRunnerSpec extends AsyncSpec {
 
   it should "return failed result if input file does not exists" in {
     val f = fixture
-    (f.handlerStub.apply _).returns { case (args, inputs, outputs, ctx) =>
+    (f.handlerStub.apply _).returns { case (args, inputs, outputs, ctx, dirs) =>
       IO.raiseError(new RuntimeException("catch me"))
     }
 
@@ -121,11 +127,13 @@ class JobRunnerSpec extends AsyncSpec {
 
   it should "return failed result if handler does not exists" in {
     val f = fixture
-    val badSpec = new JobSpec(
-      name = "bad",
-      args = Seq(),
-      inputs = Seq(),
-      outputs = Seq()
+    val badSpec = JobSpec.toMsg(
+      new JobSpec(
+        name = "bad",
+        args = Seq(),
+        inputs = Seq(),
+        outputs = Seq()
+      )
     )
 
     for {

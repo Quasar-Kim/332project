@@ -7,7 +7,8 @@ import cats.syntax.all._
 import redsort.jobs.Common._
 import redsort.jobs.scheduler
 import redsort.jobs.{messages => msg}
-import com.google.protobuf.any
+import com.google.protobuf.any.{Any => ProtobufAny}
+import scalapb.GeneratedMessage
 
 /** Shared states among all fibers. Some fields are owned by a specific fiber, which can be read by
   * anyone but only written by owner. Remaining fields are input queue of fibers.
@@ -160,7 +161,7 @@ object JobState {
   */
 final case class JobSpec(
     name: String,
-    args: Seq[Any],
+    args: Seq[GeneratedMessage],
     inputs: Seq[FileEntry],
     outputs: Seq[FileEntry]
 )
@@ -168,8 +169,7 @@ object JobSpec {
   def toMsg(spec: JobSpec): msg.JobSpecMsg =
     new msg.JobSpecMsg(
       name = spec.name,
-      // XXX: how to convert Any to protobuf Any?
-      args = Seq(),
+      args = spec.args.map(ProtobufAny.pack(_)),
       inputs = spec.inputs.map(FileEntry.toMsg),
       outputs = spec.outputs.map(FileEntry.toMsg)
     )

@@ -13,6 +13,10 @@ import redsort.jobs.scheduler.MainFiberEvents.JobCompleted
 import redsort.jobs.scheduler.MainFiberEvents.JobFailed
 import redsort.jobs.scheduler.MainFiberEvents.SystemException
 import redsort.jobs.Unreachable
+import redsort.jobs.SourceLogger
+import redsort.jobs.messages.FileEntryMsg
+import redsort.jobs.JobSystemException
+import redsort.jobs.messages.WorkerErrorKind.BODY_ERROR
 
 /** A frontend of job scheduling system.
   */
@@ -43,7 +47,7 @@ final case class JobExecutionResult(
 /** Entry point to job scheduling system.
   */
 object Scheduler {
-  private[this] val logger = getLogger
+  private[this] val logger = new SourceLogger(getLogger, "scheduler")
 
   /** Start a job system. Launches background fibers consisting scheduler system.
     *
@@ -62,7 +66,7 @@ object Scheduler {
       port: Int,
       workers: Seq[Seq[NetAddr]],
       ctx: SchedulerCtx,
-      scheduleLogic: ScheduleLogic
+      scheduleLogic: ScheduleLogic = SimpleScheduleLogic
   ): Resource[IO, Scheduler] = {
     for {
       supervisor <- Supervisor[IO]
@@ -117,7 +121,7 @@ object Scheduler {
           evt.isInstanceOf[Initialized],
           "event other than initialized is received while waiting for scheduler initialization"
         )
-        _ <- IO(logger.info("cluster initialized"))
+        _ <- logger.info("cluster initialized")
       } yield evt match {
         case Initialized(files) => files
         case _                  =>
@@ -135,7 +139,13 @@ object Scheduler {
                 IO.pure(new JobExecutionResult(results, files))
             case JobFailed(spec, result) =>
               IO.raiseError[JobExecutionResult](
-                new RuntimeException(s"Job execution failed: spec=$spec, result=$result")
+                new RuntimeException(
+                  s"Job execution failed: kind= ${result.error.get.kind}, spec=$spec",
+                  result.error.get.inner match {
+                    case Some(inner) => JobSystemException.fromMsg(inner, source = "worker")
+                    case None        => null
+                  }
+                )
               )
             case SystemException(error) => IO.raiseError[JobExecutionResult](error)
             case _                      => unreachableIO[JobExecutionResult]
@@ -185,7 +195,12 @@ object Scheduler {
     */
   def syncJobSpecs(files: Map[Int, Map[String, FileEntry]]): Seq[JobSpec] =
     files.toSeq.map { case (mid, entries) =>
-      new JobSpec(name = SYNC_JOB_NAME, args = Seq(entries), inputs = Seq(), outputs = Seq())
+      new JobSpec(
+        name = SYNC_JOB_NAME,
+        args = entries.values.map(FileEntry.toMsg(_)).toSeq,
+        inputs = Seq(),
+        outputs = Seq()
+      )
     }
 
   val SYNC_JOB_NAME = "__sync__"
