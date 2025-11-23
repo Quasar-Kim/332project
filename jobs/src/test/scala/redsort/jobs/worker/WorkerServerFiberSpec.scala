@@ -11,6 +11,8 @@ import io.grpc.Metadata
 import redsort.jobs.messages.JobResult
 import redsort.jobs.messages.JobSystemError
 import redsort.jobs.JobSystemException
+import redsort.jobs.SourceLogger
+import org.log4s._
 
 class WorkerServerFiberSpec extends AsyncSpec {
   def fixture = new {
@@ -18,7 +20,7 @@ class WorkerServerFiberSpec extends AsyncSpec {
     val jobRunnerStub = stub[JobRunner]
     val getService = for {
       stateR <- getSharedState
-    } yield WorkerRpcService.init(stateR, jobRunnerStub)
+    } yield WorkerRpcService.init(stateR, jobRunnerStub, new SourceLogger(getLogger))
   }
 
   behavior of "WorkerRpcService.runJob"

@@ -14,6 +14,8 @@ import redsort.jobs.Common.FileEntry
 import redsort.jobs.messages._
 import com.google.protobuf.any.{Any => ProtobufAny}
 import com.google.protobuf.ByteString
+import redsort.jobs.SourceLogger
+import org.log4s._
 
 class JobRunnerSpec extends AsyncSpec {
   def fixture = new {
@@ -30,7 +32,8 @@ class JobRunnerSpec extends AsyncSpec {
     val getJobRunner = JobRunner(
       handlers = Map("hello" -> handlerStub),
       dirs = dirs,
-      ctx = fileIO
+      ctx = fileIO,
+      logger = new SourceLogger(getLogger)
     )
 
     val helloSpec = new JobSpec(

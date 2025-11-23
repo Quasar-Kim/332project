@@ -17,11 +17,12 @@ import redsort.jobs.scheduler.SchedulerFiberEvents.JobCompleted
 import redsort.jobs.messages.JobResult
 import redsort.jobs.scheduler.SchedulerFiberEvents.JobFailed
 import org.log4s._
+import redsort.jobs.SourceLogger
 
 /** Scheduler fiber.
   */
 object SchedulerFiber {
-  private[this] val logger = getLogger
+  private[this] val logger = new SourceLogger(getLogger, "scheduler")
 
   def start(
       stateR: Ref[IO, SharedState],
@@ -30,7 +31,7 @@ object SchedulerFiber {
       rpcClientFiberQueues: Map[Wid, Queue[IO, WorkerFiberEvents]],
       scheduleLogic: ScheduleLogic
   ): Resource[IO, Unit] =
-    IO(logger.debug("scheduler fiber started")).toResource >>
+    logger.debug("scheduler fiber started").toResource >>
       main(
         stateR,
         mainFiberQueue,
@@ -47,7 +48,7 @@ object SchedulerFiber {
       scheduleLogic: ScheduleLogic
   ): IO[Unit] = for {
     evt <- schedulerFiberQueue.take
-    _ <- IO(logger.debug(s"got event $evt"))
+    _ <- logger.debug(s"got event $evt")
     _ <- handleEvent(evt, stateR, mainFiberQueue, rpcClientFiberQueues, scheduleLogic)
     _ <- main(stateR, mainFiberQueue, schedulerFiberQueue, rpcClientFiberQueues, scheduleLogic)
   } yield ()
@@ -107,7 +108,7 @@ object SchedulerFiber {
             state <- stateR.updateAndGet { s =>
               s.focus(_.schedulerFiber.state).replace(SchedulerState.Idle)
             }
-            _ <- IO(logger.debug("all workers initialized"))
+            _ <- logger.debug("all workers initialized")
             _ <- mainFiberQueue.offer(new MainFiberEvents.Initialized(state.schedulerFiber.files))
           } yield ()
         )
@@ -116,7 +117,7 @@ object SchedulerFiber {
     case Halt(errMsg, from) =>
       for {
         exception <- IO.pure(JobSystemException.fromMsg(errMsg, from.toString()))
-        _ <- IO(logger.error(s"received halt event from $from: $errMsg"))
+        _ <- logger.error(s"received halt event from $from: $errMsg")
         _ <- mainFiberQueue.offer(
           new MainFiberEvents.SystemException(exception)
         )
@@ -124,7 +125,7 @@ object SchedulerFiber {
 
     case FatalError(error) =>
       for {
-        - <- IO(logger.error(s"received fatal error event: $error"))
+        - <- logger.error(s"received fatal error event: $error")
         _ <- mainFiberQueue.offer(
           new MainFiberEvents.SystemException(error)
         )
@@ -142,7 +143,7 @@ object SchedulerFiber {
           )
         } else {
           for {
-            _ <- IO(logger.info(s"received ${specs.length} jobs"))
+            _ <- logger.info(s"received ${specs.length} jobs")
 
             // change state to Running.
             workerStates <- stateR
@@ -213,7 +214,7 @@ object SchedulerFiber {
             _ <-
               if (done) {
                 for {
-                  _ <- IO(logger.info("all jobs completed"))
+                  _ <- logger.info("all jobs completed")
                   updatedState <- IO.pure(updateFileEntries(updatedState))
                   _ <- mainFiberQueue.offer(
                     new MainFiberEvents.JobCompleted(

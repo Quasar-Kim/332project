@@ -14,6 +14,7 @@ import redsort.jobs.context.interface.FileStorage
 import redsort.jobs.JobSystemException
 import com.google.protobuf.ByteString
 import redsort.jobs.Unreachable
+import redsort.jobs.SourceLogger
 
 trait JobRunner {
   def addHandler(entry: Tuple2[String, JobHandler]): IO[JobRunner]
@@ -24,10 +25,15 @@ trait JobRunner {
 final case class WorkerErrorWrapper(inner: WorkerError) extends Exception("worker error", null)
 
 object JobRunner {
-  def apply(handlers: Map[String, JobHandler], dirs: Directories, ctx: FileStorage): IO[JobRunner] =
+  def apply(
+      handlers: Map[String, JobHandler],
+      dirs: Directories,
+      ctx: FileStorage,
+      logger: SourceLogger
+  ): IO[JobRunner] =
     IO.pure(new JobRunner {
       override def addHandler(entry: (String, JobHandler)): IO[JobRunner] =
-        JobRunner(handlers + entry, dirs, ctx)
+        JobRunner(handlers + entry, dirs, ctx, logger)
 
       override def runJob(spec: JobSpec): IO[JobResult] =
         runJobInner(spec).handleErrorWith {
@@ -84,9 +90,14 @@ object JobRunner {
       override def getHandlers: Map[String, JobHandler] = handlers
     })
 
-  def init(handlers: Map[String, JobHandler], dirs: Directories, ctx: FileStorage): IO[JobRunner] =
+  def init(
+      handlers: Map[String, JobHandler],
+      dirs: Directories,
+      ctx: FileStorage,
+      logger: SourceLogger
+  ): IO[JobRunner] =
     for {
       _ <- Directories.ensureDirs(dirs, ctx)
-      jobRunner <- JobRunner(handlers, dirs, ctx)
+      jobRunner <- JobRunner(handlers, dirs, ctx, logger)
     } yield jobRunner
 }

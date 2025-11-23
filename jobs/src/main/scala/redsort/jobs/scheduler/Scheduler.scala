@@ -13,6 +13,7 @@ import redsort.jobs.scheduler.MainFiberEvents.JobCompleted
 import redsort.jobs.scheduler.MainFiberEvents.JobFailed
 import redsort.jobs.scheduler.MainFiberEvents.SystemException
 import redsort.jobs.Unreachable
+import redsort.jobs.SourceLogger
 
 /** A frontend of job scheduling system.
   */
@@ -43,7 +44,7 @@ final case class JobExecutionResult(
 /** Entry point to job scheduling system.
   */
 object Scheduler {
-  private[this] val logger = getLogger
+  private[this] val logger = new SourceLogger(getLogger, "scheduler")
 
   /** Start a job system. Launches background fibers consisting scheduler system.
     *
@@ -62,7 +63,7 @@ object Scheduler {
       port: Int,
       workers: Seq[Seq[NetAddr]],
       ctx: SchedulerCtx,
-      scheduleLogic: ScheduleLogic
+      scheduleLogic: ScheduleLogic = SimpleScheduleLogic
   ): Resource[IO, Scheduler] = {
     for {
       supervisor <- Supervisor[IO]
@@ -117,7 +118,7 @@ object Scheduler {
           evt.isInstanceOf[Initialized],
           "event other than initialized is received while waiting for scheduler initialization"
         )
-        _ <- IO(logger.info("cluster initialized"))
+        _ <- logger.info("cluster initialized")
       } yield evt match {
         case Initialized(files) => files
         case _                  =>
