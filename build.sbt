@@ -7,6 +7,8 @@ ThisBuild / organization := "org.postech.csed332_25.red"
 // Scalatest recommends turning this off since it implmenets its own
 // buffering algorithm.
 Test / logBuffered := false
+// reprint all errors at the bottom of the test suite run.
+Test / testOptions += Tests.Argument("-oG")
 
 // Required by artima supersafe plugin, which comes with sclatest
 ThisBuild / resolvers += "Artima Maven Repository" at "https://repo.artima.com/releases"
@@ -15,7 +17,7 @@ lazy val commonSettings = Seq(
   scalafmtOnCompile := true,
   libraryDependencies ++= deps,
   Compile / run / fork := true,
-  scalacOptions ++= Seq("-feature", "-language:reflectiveCalls", "-Werror")
+  scalacOptions ++= Seq("-feature", "-language:reflectiveCalls", "-Werror", "-deprecation")
 )
 
 lazy val jobs = (project in file("jobs"))

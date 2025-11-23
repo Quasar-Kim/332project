@@ -22,14 +22,15 @@ object WorkerRpcClientFiber {
       schedulerFiberQueue: Queue[IO, SchedulerFiberEvents],
       ctx: WorkerRpcClient
   ): Resource[IO, Unit] =
-    IO(logger.debug(s"RPC client fiber for $wid started")).toResource.flatMap { _ =>
-      ctx
-        .workerRpcClient(5000)
+    for {
+      serverAddr <- stateR.get.map(_.schedulerFiber.workers(wid).netAddr).toResource
+      _ <- IO(logger.debug(s"RPC client fiber for $wid started")).toResource
+      _ <- ctx
+        .workerRpcClient(serverAddr)
         .flatMap(rpcClient =>
           main(stateR, wid, inputQueue, schedulerFiberQueue, rpcClient).background
         )
-        .evalMap(_ => IO.unit)
-    }
+    } yield ()
 
   private def main(
       stateR: Ref[IO, SharedState],

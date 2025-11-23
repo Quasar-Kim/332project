@@ -11,7 +11,7 @@ message LocalStorageInfo {
        worker does not know its machine ID at that point.*/
     optional int32 mid = 1;                     
     /* Remaining storage in bytes. */
-    int32 remainingStorage = 2;                 
+    int64 remainingStorage = 2;                 
     /* Map of File entries, indexed by path. */
     map<string, FileEntryMsg> entries = 3;      
 }
@@ -21,7 +21,7 @@ message FileEntryMsg {
     /* Absolute, symbolic path to the file. */
     string path = 1;
     /* File size in bytes. */
-    int32 size = 2;
+    int64 size = 2;
     /* List of machiens to which this file is replicated. */
     repeated int32 replicas = 3;
 }

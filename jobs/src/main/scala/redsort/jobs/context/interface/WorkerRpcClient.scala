@@ -5,7 +5,8 @@ import cats.effect._
 import cats.syntax._
 import redsort.jobs.messages.WorkerFs2Grpc
 import io.grpc.Metadata
+import redsort.jobs.Common.NetAddr
 
 trait WorkerRpcClient {
-  def workerRpcClient(port: Int): Resource[IO, WorkerFs2Grpc[IO, Metadata]]
+  def workerRpcClient(addr: NetAddr): Resource[IO, WorkerFs2Grpc[IO, Metadata]]
 }
