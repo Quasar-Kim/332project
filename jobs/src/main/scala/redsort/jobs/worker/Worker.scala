@@ -83,7 +83,7 @@ object Worker {
   def createWorkingDir(ctx: FileStorage): IO[Path] = {
     for {
       timestamp <- IO(LocalDateTime.now.format(DateTimeFormatter.ofPattern("YYYYMMdd_HHmmss")))
-      path <- IO.pure(Path("/tmp") / s"redsort-working-$timestamp")
+      path <- IO(Path(System.getProperty("user.dir")) / s"redsort-working-$timestamp")
       _ <- ctx.mkDir(path.toString)
     } yield path
   }
