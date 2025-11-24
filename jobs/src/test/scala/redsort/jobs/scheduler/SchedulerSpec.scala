@@ -48,65 +48,81 @@ class SchedulerSpec extends AsyncSpec {
       }))
 
       // start scheduler
-      scheduler <- Scheduler(5000, workers, ctxStub, SimpleScheduleLogic)
+      scheduler <- Scheduler(
+        port = 5000,
+        numMachines = 2,
+        numWorkersPerMachine = 2,
+        ctx = ctxStub
+      )
 
       // get intercepted server implementation
       grpc <- Resource.eval(grpcDeferred.get)
     } yield (scheduler, grpc)
 
     def initAll(grpc: SchedulerFs2Grpc[IO, Metadata]) = for {
-      _ <- grpc.registerWorker(
-        new WorkerHello(
-          wtid = 0,
-          storageInfo = Some(
-            new LocalStorageInfo(
-              mid = None,
-              remainingStorage = 1024,
-              entries = Map(
-                "@{input}/a" -> new FileEntryMsg(
-                  path = "@{input}/a",
-                  size = 1024,
-                  replicas = Seq()
-                ),
-                "@{input}/b" -> new FileEntryMsg(path = "@{input}/b", size = 1024, replicas = Seq())
+      // registration must happen in parallel
+      _ <- (
+        grpc.registerWorker(
+          new WorkerHello(
+            wtid = 0,
+            storageInfo = Some(
+              new LocalStorageInfo(
+                mid = None,
+                remainingStorage = 1024,
+                entries = Map(
+                  "@{input}/a" -> new FileEntryMsg(
+                    path = "@{input}/a",
+                    size = 1024,
+                    replicas = Seq()
+                  ),
+                  "@{input}/b" -> new FileEntryMsg(
+                    path = "@{input}/b",
+                    size = 1024,
+                    replicas = Seq()
+                  )
+                )
               )
-            )
+            ),
+            ip = "1.1.1.1",
+            port = 5000
           ),
-          ip = "1.1.1.1",
-          port = 5000
+          new Metadata
         ),
-        new Metadata
-      )
-      _ <- grpc.registerWorker(
-        new WorkerHello(wtid = 1, storageInfo = None, ip = "1.1.1.1", port = 5001),
-        new Metadata
-      )
-      _ <- grpc.registerWorker(
-        new WorkerHello(
-          wtid = 0,
-          storageInfo = Some(
-            new LocalStorageInfo(
-              mid = None,
-              remainingStorage = 1024,
-              entries = Map(
-                "@{input}/c" -> new FileEntryMsg(
-                  path = "@{input}/c",
-                  size = 1024,
-                  replicas = Seq()
-                ),
-                "@{input}/d" -> new FileEntryMsg(path = "@{input}/d", size = 1024, replicas = Seq())
+        grpc.registerWorker(
+          new WorkerHello(wtid = 1, storageInfo = None, ip = "1.1.1.1", port = 5001),
+          new Metadata
+        ),
+        grpc.registerWorker(
+          new WorkerHello(
+            wtid = 0,
+            storageInfo = Some(
+              new LocalStorageInfo(
+                mid = None,
+                remainingStorage = 1024,
+                entries = Map(
+                  "@{input}/c" -> new FileEntryMsg(
+                    path = "@{input}/c",
+                    size = 1024,
+                    replicas = Seq()
+                  ),
+                  "@{input}/d" -> new FileEntryMsg(
+                    path = "@{input}/d",
+                    size = 1024,
+                    replicas = Seq()
+                  )
+                )
               )
-            )
+            ),
+            ip = "1.1.1.2",
+            port = 5000
           ),
-          ip = "1.1.1.2",
-          port = 5000
+          new Metadata
         ),
-        new Metadata
-      )
-      _ <- grpc.registerWorker(
-        new WorkerHello(wtid = 1, storageInfo = None, ip = "1.1.1.2", port = 5001),
-        new Metadata
-      )
+        grpc.registerWorker(
+          new WorkerHello(wtid = 1, storageInfo = None, ip = "1.1.1.2", port = 5001),
+          new Metadata
+        )
+      ).parMapN((_, _, _, _) => IO.unit)
     } yield ()
   }
 
@@ -152,29 +168,30 @@ class SchedulerSpec extends AsyncSpec {
           // now waitWorkers should pass
           files <- scheduler.waitInit.timeout(100.millis)
         } yield {
-          files should be(
-            Map(
-              0 -> Map(
-                "@{input}/a" -> new FileEntry(
-                  path = "@{input}/a",
-                  size = 1024,
-                  replicas = Seq(0)
-                ),
-                "@{input}/b" -> new FileEntry(path = "@{input}/b", size = 1024, replicas = Seq(0))
-              ),
-              1 -> Map(
-                "@{input}/c" -> new FileEntry(
-                  path = "@{input}/c",
-                  size = 1024,
-                  replicas = Seq(1)
-                ),
-                "@{input}/d" -> new FileEntry(
-                  path = "@{input}/d",
-                  size = 1024,
-                  replicas = Seq(1)
-                )
-              )
+          val machineOneFiles = Map(
+            "@{input}/a" -> new FileEntry(
+              path = "@{input}/a",
+              size = 1024,
+              replicas = Seq(0)
+            ),
+            "@{input}/b" -> new FileEntry(path = "@{input}/b", size = 1024, replicas = Seq(0))
+          )
+          val machineTwoFiles = Map(
+            "@{input}/c" -> new FileEntry(
+              path = "@{input}/c",
+              size = 1024,
+              replicas = Seq(1)
+            ),
+            "@{input}/d" -> new FileEntry(
+              path = "@{input}/d",
+              size = 1024,
+              replicas = Seq(1)
             )
+          )
+
+          files should (
+            be(Map(0 -> machineOneFiles, 1 -> machineTwoFiles))
+              or be(Map(0 -> machineTwoFiles, 1 -> machineOneFiles))
           )
         }
       }

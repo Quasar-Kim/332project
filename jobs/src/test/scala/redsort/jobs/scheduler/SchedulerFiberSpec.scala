@@ -22,17 +22,18 @@ import redsort.jobs.messages.FileEntryMsg
 
 class SchedulerFiberSpec extends AsyncSpec {
   def fixture = new {
-    val workerAddrs = Map(
-      new Wid(0, 0) -> new NetAddr("1.1.1.1", 5000),
-      new Wid(0, 1) -> new NetAddr("1.1.1.1", 5001),
-      new Wid(1, 0) -> new NetAddr("1.1.1.2", 5000),
-      new Wid(1, 1) -> new NetAddr("1.1.1.2", 5001)
+    val wids = Seq(
+      new Wid(0, 0),
+      new Wid(0, 1),
+      new Wid(1, 0),
+      new Wid(1, 1)
     )
 
-    val getSharedState = SharedState.init(workerAddrs)
+    val getSharedState = SharedState.init(wids)
     val getMainFiberQueue = Queue.unbounded[IO, MainFiberEvents]
     val getSchedulerFiberQueue = Queue.unbounded[IO, SchedulerFiberEvents]
-    val getRpcClientFiberQueues = Scheduler.createRpcClientFiberQueues(workerAddrs)
+    val getRpcClientFiberQueues = Scheduler.createRpcClientFiberQueues(wids)
+    val getRpcServerFiberQueue = Queue.unbounded[IO, RpcServerFiberEvents]
 
     val scheduleLogic = new ScheduleLogic {
       override def schedule(
@@ -65,6 +66,7 @@ class SchedulerFiberSpec extends AsyncSpec {
         mainFiberQueue <- getMainFiberQueue
         schedulerFiberQueue <- getSchedulerFiberQueue
         rpcClientFiberQueues <- getRpcClientFiberQueues
+        rpcServerFiberQueue <- getRpcServerFiberQueue
         _ <- sv
           .supervise(
             SchedulerFiber
@@ -73,12 +75,19 @@ class SchedulerFiberSpec extends AsyncSpec {
                 mainFiberQueue,
                 schedulerFiberQueue,
                 rpcClientFiberQueues,
+                rpcServerFiberQueue,
                 scheduleLogic
               )
               .useForever
           )
           .void
-      } yield (stateR, mainFiberQueue, schedulerFiberQueue, rpcClientFiberQueues)
+      } yield (
+        stateR,
+        mainFiberQueue,
+        schedulerFiberQueue,
+        rpcClientFiberQueues,
+        rpcServerFiberQueue
+      )
     )
 
     def initAll(
@@ -109,17 +118,17 @@ class SchedulerFiberSpec extends AsyncSpec {
                   )
                 )
               ),
-              ip = "1.1.1.1"
-            ),
-            new Wid(0, 0)
+              ip = "1.1.1.1",
+              port = 5000
+            )
           ),
           new SchedulerFiberEvents.WorkerRegistration(
             new WorkerHello(
               wtid = 1,
               storageInfo = None,
-              ip = "1.1.1.1"
-            ),
-            new Wid(0, 1)
+              ip = "1.1.1.1",
+              port = 5001
+            )
           ),
           new SchedulerFiberEvents.WorkerRegistration(
             new WorkerHello(
@@ -142,17 +151,17 @@ class SchedulerFiberSpec extends AsyncSpec {
                   )
                 )
               ),
-              ip = "1.1.1.2"
-            ),
-            new Wid(1, 0)
+              ip = "1.1.1.2",
+              port = 5000
+            )
           ),
           new SchedulerFiberEvents.WorkerRegistration(
             new WorkerHello(
               wtid = 1,
               storageInfo = None,
-              ip = "1.1.1.2"
-            ),
-            new Wid(1, 1)
+              ip = "1.1.1.2",
+              port = 5001
+            )
           )
         )
       )
@@ -161,8 +170,6 @@ class SchedulerFiberSpec extends AsyncSpec {
       assume(evt.isInstanceOf[MainFiberEvents.Initialized])
     }
   }
-
-  val wid = new Wid(1, 0)
 
   val jobSpecA = new JobSpec(name = "a", args = Seq(), inputs = Seq(), outputs = Seq())
   val jobSpecB = new JobSpec(name = "b", args = Seq(), inputs = Seq(), outputs = Seq())
@@ -200,31 +207,35 @@ class SchedulerFiberSpec extends AsyncSpec {
           )
         )
       ),
-      ip = "1.1.1.2"
+      ip = "1.1.1.2",
+      port = 5000
     )
+    val wid = new Wid(0, 0) // this is first worker to register so will receive wid 0, 0
 
     f.startSchedulerFiber
-      .use { case (stateR, mainFiberQueue, schedulerFiberQueue, rpcClientFiberQueues) =>
+      .use { case (stateR, mainFiberQueue, schedulerFiberQueue, rpcClientFiberQueues, _) =>
         for {
           state <- stateR.get
           _ <- IO(state.schedulerFiber.workers(wid).initialized should be(false))
+          _ <- IO(state.schedulerFiber.workers(wid).netAddr should be(None))
           _ <- schedulerFiberQueue.offer(
-            new SchedulerFiberEvents.WorkerRegistration(workerHello, wid)
+            new SchedulerFiberEvents.WorkerRegistration(workerHello)
           )
           _ <- IO.sleep(100.millis)
           state <- stateR.get
         } yield {
-          val s = state.schedulerFiber.workers(wid)
-          s.initialized should be(true)
-          s.status should be(WorkerStatus.Up)
+          val workerState = state.schedulerFiber.workers(wid)
+          workerState.initialized should be(true)
+          workerState.status should be(WorkerStatus.Up)
+          workerState.netAddr should be(Some(new NetAddr("1.1.1.2", 5000)))
           state.schedulerFiber.files(wid.mid) should be(
             Map(
               "@{working}/a" -> new FileEntry(
                 path = "@{working}/a",
                 size = 1024,
-                replicas = Seq(1)
+                replicas = Seq(0)
               ),
-              "@{working}/b" -> new FileEntry(path = "@{working}/b", size = 1024, replicas = Seq(1))
+              "@{working}/b" -> new FileEntry(path = "@{working}/b", size = 1024, replicas = Seq(0))
             )
           )
         }
@@ -232,16 +243,79 @@ class SchedulerFiberSpec extends AsyncSpec {
       .timeout(1.second)
   }
 
-  it should "emit Initialized event when all workers are registered and change state to Idle" in {
+  it should "emit Initialized event to main fiber when all workers are registered and change state to Idle" in {
     val f = fixture
 
     f.startSchedulerFiber
-      .use { case (stateR, mainFiberQueue, schedulerFiberQueue, rpcClientFiberQueues) =>
+      .use { case (stateR, mainFiberQueue, schedulerFiberQueue, rpcClientFiberQueues, _) =>
         for {
-          _ <- f.initAll(stateR, mainFiberQueue, schedulerFiberQueue)
+          _ <- f.initAll(
+            stateR,
+            mainFiberQueue,
+            schedulerFiberQueue
+          ) // this consumes Initialized event
           state <- stateR.get
         } yield {
-          state.schedulerFiber.state should be(SchedulerState.Idle)
+          state.schedulerFiber.state should be(
+            SchedulerState.Idle
+          )
+        }
+      }
+      .timeout(1.second)
+  }
+
+  it should "emit AllInitialized events to RPC server fiber when all workers are registerd" in {
+    val f = fixture
+    val allInitializedEvt = new RpcServerFiberEvents.AllWorkersInitialized(
+      Map(
+        0 -> new NetAddr("1.1.1.1", 4999),
+        1 -> new NetAddr("1.1.1.2", 4999)
+      )
+    )
+
+    f.startSchedulerFiber
+      .use {
+        case (
+              stateR,
+              mainFiberQueue,
+              schedulerFiberQueue,
+              rpcClientFiberQueues,
+              rpcServerFiberQueue
+            ) =>
+          for {
+            _ <- f.initAll(stateR, mainFiberQueue, schedulerFiberQueue)
+            evtA <- rpcServerFiberQueue.take
+            evtB <- rpcServerFiberQueue.take
+            evtC <- rpcServerFiberQueue.take
+            evtD <- rpcServerFiberQueue.take
+            state <- stateR.get
+          } yield {
+            evtA should be(allInitializedEvt)
+            evtB should be(allInitializedEvt)
+            evtC should be(allInitializedEvt)
+            evtD should be(allInitializedEvt)
+          }
+      }
+      .timeout(1.second)
+  }
+
+  it should "emit Initialized events to RPC client fibers when all workers are registered" in {
+    val f = fixture
+
+    f.startSchedulerFiber
+      .use { case (stateR, mainFiberQueue, schedulerFiberQueue, rpcClientFiberQueues, _) =>
+        for {
+          _ <- f.initAll(stateR, mainFiberQueue, schedulerFiberQueue)
+          evtA <- rpcClientFiberQueues(new Wid(0, 0)).take
+          evtB <- rpcClientFiberQueues(new Wid(0, 1)).take
+          evtC <- rpcClientFiberQueues(new Wid(1, 0)).take
+          evtD <- rpcClientFiberQueues(new Wid(1, 1)).take
+          state <- stateR.get
+        } yield {
+          evtA should be(new WorkerFiberEvents.Initialized(new NetAddr("1.1.1.1", 5000)))
+          evtB should be(new WorkerFiberEvents.Initialized(new NetAddr("1.1.1.1", 5001)))
+          evtC should be(new WorkerFiberEvents.Initialized(new NetAddr("1.1.1.2", 5000)))
+          evtD should be(new WorkerFiberEvents.Initialized(new NetAddr("1.1.1.2", 5001)))
         }
       }
       .timeout(1.second)
@@ -264,9 +338,10 @@ class SchedulerFiberSpec extends AsyncSpec {
       cause = None,
       context = Map()
     )
+    val wid = new Wid(1, 0)
 
     f.startSchedulerFiber
-      .use { case (stateR, mainFiberQueue, schedulerFiberQueue, rpcClientFiberQueues) =>
+      .use { case (stateR, mainFiberQueue, schedulerFiberQueue, rpcClientFiberQueues, _) =>
         for {
           _ <- schedulerFiberQueue.offer(new SchedulerFiberEvents.Halt(err, wid))
           evt <- mainFiberQueue.take
@@ -290,7 +365,7 @@ class SchedulerFiberSpec extends AsyncSpec {
     val err = new AssertionError("you miserably failed")
 
     f.startSchedulerFiber
-      .use { case (stateR, mainFiberQueue, schedulerFiberQueue, rpcClientFiberQueues) =>
+      .use { case (stateR, mainFiberQueue, schedulerFiberQueue, rpcClientFiberQueues, _) =>
         for {
           _ <- schedulerFiberQueue.offer(new SchedulerFiberEvents.FatalError(err))
           evt <- mainFiberQueue.take
@@ -309,10 +384,18 @@ class SchedulerFiberSpec extends AsyncSpec {
     val f = fixture
 
     f.startSchedulerFiber
-      .use { case (stateR, mainFiberQueue, schedulerFiberQueue, rpcClientFiberQueues) =>
+      .use { case (stateR, mainFiberQueue, schedulerFiberQueue, rpcClientFiberQueues, _) =>
         for {
           _ <- f.initAll(stateR, mainFiberQueue, schedulerFiberQueue)
           _ <- schedulerFiberQueue.offer(new SchedulerFiberEvents.Jobs(jobSpecs))
+
+          // flush Initialized events
+          _ <- rpcClientFiberQueues(new Wid(0, 0)).take
+          _ <- rpcClientFiberQueues(new Wid(0, 1)).take
+          _ <- rpcClientFiberQueues(new Wid(1, 0)).take
+          _ <- rpcClientFiberQueues(new Wid(1, 1)).take
+
+          // get jobs event
           a <- rpcClientFiberQueues(new Wid(0, 0)).take
           b <- rpcClientFiberQueues(new Wid(0, 1)).take
           c <- rpcClientFiberQueues(new Wid(1, 0)).take
@@ -334,7 +417,7 @@ class SchedulerFiberSpec extends AsyncSpec {
     val f = fixture
 
     f.startSchedulerFiber
-      .use { case (stateR, mainFiberQueue, schedulerFiberQueue, rpcClientFiberQueues) =>
+      .use { case (stateR, mainFiberQueue, schedulerFiberQueue, rpcClientFiberQueues, _) =>
         for {
           // no init
           _ <- schedulerFiberQueue.offer(new SchedulerFiberEvents.Jobs(jobSpecs))
@@ -359,12 +442,19 @@ class SchedulerFiberSpec extends AsyncSpec {
     val wid = new Wid(0, 0)
 
     f.startSchedulerFiber
-      .use { case (stateR, mainFiberQueue, schedulerFiberQueue, rpcClientFiberQueues) =>
+      .use { case (stateR, mainFiberQueue, schedulerFiberQueue, rpcClientFiberQueues, _) =>
         for {
           _ <- f.initAll(stateR, mainFiberQueue, schedulerFiberQueue)
 
+          // flush rpc client queuese
+          _ <- rpcClientFiberQueues(new Wid(0, 0)).take
+          _ <- rpcClientFiberQueues(new Wid(0, 1)).take
+          _ <- rpcClientFiberQueues(new Wid(1, 0)).take
+          _ <- rpcClientFiberQueues(new Wid(1, 1)).take
+
           // schedule four + one jobs, each scheduled to each workers
           _ <- schedulerFiberQueue.offer(new SchedulerFiberEvents.Jobs(jobSpecs :+ jobSpecE))
+
           a <- rpcClientFiberQueues(new Wid(0, 0)).take
           b <- rpcClientFiberQueues(new Wid(0, 1)).take
           c <- rpcClientFiberQueues(new Wid(1, 0)).take
@@ -403,7 +493,7 @@ class SchedulerFiberSpec extends AsyncSpec {
     val wid = new Wid(0, 0)
 
     f.startSchedulerFiber
-      .use { case (stateR, mainFiberQueue, schedulerFiberQueue, rpcClientFiberQueues) =>
+      .use { case (stateR, mainFiberQueue, schedulerFiberQueue, rpcClientFiberQueues, _) =>
         for {
           _ <- f.initAll(stateR, mainFiberQueue, schedulerFiberQueue)
           _ <- schedulerFiberQueue.offer(new SchedulerFiberEvents.Jobs(jobSpecs))
@@ -506,7 +596,7 @@ class SchedulerFiberSpec extends AsyncSpec {
     )
 
     f.startSchedulerFiber
-      .use { case (stateR, mainFiberQueue, schedulerFiberQueue, rpcClientFiberQueues) =>
+      .use { case (stateR, mainFiberQueue, schedulerFiberQueue, rpcClientFiberQueues, _) =>
         for {
           _ <- f.initAll(stateR, mainFiberQueue, schedulerFiberQueue)
           _ <- schedulerFiberQueue.offer(
@@ -600,7 +690,7 @@ class SchedulerFiberSpec extends AsyncSpec {
     val wid = new Wid(0, 0)
 
     f.startSchedulerFiber
-      .use { case (stateR, mainFiberQueue, schedulerFiberQueue, rpcClientFiberQueues) =>
+      .use { case (stateR, mainFiberQueue, schedulerFiberQueue, rpcClientFiberQueues, _) =>
         for {
           _ <- f.initAll(stateR, mainFiberQueue, schedulerFiberQueue)
 
@@ -637,12 +727,17 @@ class SchedulerFiberSpec extends AsyncSpec {
     val f = fixture
 
     f.startSchedulerFiber
-      .use { case (stateR, mainFiberQueue, schedulerFiberQueue, rpcClientFiberQueues) =>
+      .use { case (stateR, mainFiberQueue, schedulerFiberQueue, rpcClientFiberQueues, _) =>
         for {
           _ <- f.initAll(stateR, mainFiberQueue, schedulerFiberQueue)
+          _ <- rpcClientFiberQueues(new Wid(0, 0)).take
+          _ <- rpcClientFiberQueues(new Wid(0, 1)).take
+          _ <- rpcClientFiberQueues(new Wid(1, 0)).take
+          _ <- rpcClientFiberQueues(new Wid(1, 1)).take
 
           // enqueue Complete event
           _ <- schedulerFiberQueue.offer(new SchedulerFiberEvents.Complete)
+
           evtA <- rpcClientFiberQueues(new Wid(0, 0)).take
           evtB <- rpcClientFiberQueues(new Wid(0, 1)).take
           evtC <- rpcClientFiberQueues(new Wid(1, 0)).take

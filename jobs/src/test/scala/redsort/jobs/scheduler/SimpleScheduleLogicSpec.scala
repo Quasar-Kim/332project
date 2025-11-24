@@ -7,15 +7,9 @@ import monocle.syntax.all._
 import redsort.jobs.Unreachable
 
 class SimpleScheduleLogicSpec extends SyncSpec {
-  val workerAddrs = Map(
-    new Wid(0, 0) -> new NetAddr("1.1.1.1", 5000),
-    new Wid(0, 1) -> new NetAddr("1.1.1.1", 5001),
-    new Wid(1, 0) -> new NetAddr("1.1.1.2", 5000),
-    new Wid(1, 1) -> new NetAddr("1.1.1.2", 5001)
-  )
-
+  val wids = Seq(new Wid(0, 0), new Wid(0, 1), new Wid(1, 0), new Wid(1, 1))
   val workerState = SchedulerFiberState
-    .init(workerAddrs)
+    .init(wids)
     .workers
     .view
     .mapValues(_.focus(_.initialized).replace(true).focus(_.status).replace(WorkerStatus.Up))

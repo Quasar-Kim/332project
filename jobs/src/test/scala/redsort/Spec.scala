@@ -35,4 +35,4 @@ class AsyncFunSpec
 class SyncSpec extends AnyFlatSpec with SpecBase
 
 // Test that use actual networking
-object NetworkTest extends Tag("redsort.networking")
+object NetworkTest extends Tag("redsort.jobs.tags.NetworkTest")

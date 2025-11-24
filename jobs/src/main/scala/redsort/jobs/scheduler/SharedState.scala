@@ -27,9 +27,9 @@ final case class SharedState(
 )
 
 object SharedState {
-  def init(workers: Map[Wid, NetAddr]) = {
-    val initialSchedulerFiber = SchedulerFiberState.init(workers)
-    val initialRpcClientFibers = workers.map { case (wid, _) => (wid, RpcClientFiberState.init) }
+  def init(wids: Seq[Wid]) = {
+    val initialSchedulerFiber = SchedulerFiberState.init(wids)
+    val initialRpcClientFibers = wids.map { case wid => (wid, RpcClientFiberState.init) }.toMap
     val initialRpcServerFiber = RpcServerFiberState.init
 
     val initialState = SharedState(
@@ -58,9 +58,9 @@ final case class SchedulerFiberState(
 )
 
 object SchedulerFiberState {
-  def init(workers: Map[Wid, NetAddr]) = new SchedulerFiberState(
+  def init(wids: Seq[Wid]) = new SchedulerFiberState(
     state = SchedulerState.Initializing,
-    workers = workers.map { case (wid, netAddr) => (wid, WorkerState.init(wid, netAddr)) },
+    workers = wids.map { case wid => (wid, WorkerState.init(wid)) }.toMap,
     files = Map()
   )
 }
@@ -93,7 +93,7 @@ object SchedulerState {
   */
 final case class WorkerState(
     wid: Wid,
-    netAddr: NetAddr,
+    netAddr: Option[NetAddr], // network address is unknown until worker is registered
     status: WorkerStatus,
     pendingJobs: Queue[Job],
     runningJob: Option[Job],
@@ -103,9 +103,9 @@ final case class WorkerState(
 )
 
 object WorkerState {
-  def init(wid: Wid, netAddr: NetAddr) = new WorkerState(
+  def init(wid: Wid) = new WorkerState(
     wid = wid,
-    netAddr = netAddr,
+    netAddr = None,
     status = WorkerStatus.Down,
     pendingJobs = Queue(),
     runningJob = None,
@@ -220,11 +220,8 @@ object SchedulerFiberEvents {
     *
     * @param hello
     *   hello message sent by worker.
-    * @param from
-    *   sender of worker hello.
     */
-  final case class WorkerRegistration(hello: msg.WorkerHello, from: Wid)
-      extends SchedulerFiberEvents
+  final case class WorkerRegistration(hello: msg.WorkerHello) extends SchedulerFiberEvents
 
   /** Worker did not called Heartbeat RPC method in timeout.
     *
@@ -287,6 +284,7 @@ object SchedulerFiberEvents {
   */
 sealed abstract class WorkerFiberEvents
 object WorkerFiberEvents {
+  final case class Initialized(addr: NetAddr) extends WorkerFiberEvents
   final case class Job(spec: JobSpec) extends WorkerFiberEvents
   final case object WorkerDown extends WorkerFiberEvents
   final case object WorkerUp extends WorkerFiberEvents
@@ -305,4 +303,10 @@ object MainFiberEvents {
   final case class JobFailed(spec: JobSpec, result: msg.JobResult) extends MainFiberEvents
   final case class SystemException(error: Throwable) extends MainFiberEvents
   final case object CompleteDone extends MainFiberEvents
+}
+
+sealed abstract class RpcServerFiberEvents
+object RpcServerFiberEvents {
+  final case class AllWorkersInitialized(replicatorAddrs: Map[Mid, NetAddr])
+      extends RpcServerFiberEvents
 }

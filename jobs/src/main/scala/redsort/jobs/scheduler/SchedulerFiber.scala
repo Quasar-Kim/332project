@@ -20,6 +20,8 @@ import org.log4s._
 import redsort.jobs.SourceLogger
 import redsort.jobs.scheduler.SchedulerFiberEvents.Complete
 import redsort.jobs.scheduler.SchedulerFiberEvents.WorkerCompleted
+import redsort.jobs.messages.WorkerHello
+import redsort.jobs.messages.NetAddrMsg
 
 /** Scheduler fiber.
   */
@@ -31,6 +33,7 @@ object SchedulerFiber {
       mainFiberQueue: Queue[IO, MainFiberEvents],
       schedulerFiberQueue: Queue[IO, SchedulerFiberEvents],
       rpcClientFiberQueues: Map[Wid, Queue[IO, WorkerFiberEvents]],
+      rpcServerFiberQueue: Queue[IO, RpcServerFiberEvents],
       scheduleLogic: ScheduleLogic
   ): Resource[IO, Unit] =
     logger.debug("scheduler fiber started").toResource >>
@@ -39,6 +42,7 @@ object SchedulerFiber {
         mainFiberQueue,
         schedulerFiberQueue,
         rpcClientFiberQueues,
+        rpcServerFiberQueue,
         scheduleLogic
       ).background.evalMap(_ => IO.unit)
 
@@ -47,12 +51,27 @@ object SchedulerFiber {
       mainFiberQueue: Queue[IO, MainFiberEvents],
       schedulerFiberQueue: Queue[IO, SchedulerFiberEvents],
       rpcClientFiberQueues: Map[Wid, Queue[IO, WorkerFiberEvents]],
+      rpcServerFiberQueue: Queue[IO, RpcServerFiberEvents],
       scheduleLogic: ScheduleLogic
   ): IO[Unit] = for {
     evt <- schedulerFiberQueue.take
     _ <- logger.debug(s"got event $evt")
-    _ <- handleEvent(evt, stateR, mainFiberQueue, rpcClientFiberQueues, scheduleLogic)
-    _ <- main(stateR, mainFiberQueue, schedulerFiberQueue, rpcClientFiberQueues, scheduleLogic)
+    _ <- handleEvent(
+      evt,
+      stateR,
+      mainFiberQueue,
+      rpcClientFiberQueues,
+      rpcServerFiberQueue,
+      scheduleLogic
+    )
+    _ <- main(
+      stateR,
+      mainFiberQueue,
+      schedulerFiberQueue,
+      rpcClientFiberQueues,
+      rpcServerFiberQueue,
+      scheduleLogic
+    )
   } yield ()
 
   private def handleEvent(
@@ -60,60 +79,62 @@ object SchedulerFiber {
       stateR: Ref[IO, SharedState],
       mainFiberQueue: Queue[IO, MainFiberEvents],
       rpcClientFiberQueues: Map[Wid, Queue[IO, WorkerFiberEvents]],
+      rpcServerFiberQueue: Queue[IO, RpcServerFiberEvents],
       scheduleLogic: ScheduleLogic
   ): IO[Unit] = evt match {
-    case WorkerRegistration(hello, from) =>
+    case WorkerRegistration(hello) =>
       for {
-        workerStates <- stateR.get.map(s => s.schedulerFiber.workers)
-        _ <- assertIO(!workerStates(from).initialized)
+        state <- stateR.get
+        result <- IO.pure {
+          // try to resolve worker ID.
+          val widOpt = tryResolvingWorkerID(state.schedulerFiber.workers, hello)
 
-        workerStates <- stateR
-          .updateAndGet { state =>
-            // update worker state by setting initialized field to true
-            state
-              .focus(_.schedulerFiber.workers)
-              .at(from)
-              .modify {
-                case Some(s) => {
-                  Some(
-                    s.focus(_.initialized)
-                      .replace(true)
-                      .focus(_.status)
-                      .replace(WorkerStatus.Up)
+          // if wid is valid, initialize worker state, otherwise don't
+          widOpt match {
+            case Some(wid) => (initializeWorkerState(state, wid, hello), true)
+            case None      => (state, false)
+          }
+        }
+        state <- IO.pure(result._1)
+        valid <- IO.pure(result._2)
+
+        // only this fiber is allowed update this state so this is safe.
+        _ <- stateR.update(_ => state)
+
+        // if registration is valid and worker are registered, emit Initialized event to main fiber,
+        // AllWorkersInitialized event to RPC server fiber, and Initialized events to RPC client fibers.
+        // if invalid, then just emit AllWorkersInitialized event to RPC server fiber.
+        _ <-
+          if (valid)
+            IO.whenA(state.schedulerFiber.workers.forall { case (_, state) => state.initialized })(
+              for {
+                state <- stateR.updateAndGet { s =>
+                  s.focus(_.schedulerFiber.state).replace(SchedulerState.Idle)
+                }
+                _ <- logger.debug("all workers are initialized")
+                _ <- mainFiberQueue
+                  .offer(new MainFiberEvents.Initialized(state.schedulerFiber.files))
+                _ <- (0 until state.schedulerFiber.workers.size).toList.traverse { _ =>
+                  rpcServerFiberQueue.offer(
+                    new RpcServerFiberEvents.AllWorkersInitialized(
+                      getReplicatorAddresses(state.schedulerFiber.workers)
+                    )
                   )
                 }
-                case None => None
-              }
-              // also update file entries of a machine according to WorkerHello
-              .focus(_.schedulerFiber.files)
-              .at(from.mid)
-              .modify { files =>
-                hello.storageInfo match {
-                  case Some(info) =>
-                    Some(
-                      info.entries.view
-                        .mapValues(
-                          FileEntry.fromMsg(_).focus(_.replicas).replace(Seq(from.mid))
-                        ) // set mid as only replica of input files.
-                        .to(Map)
-                    )
-                  case None => files
+                _ <- rpcClientFiberQueues.toList.traverse { case (wid, queue) =>
+                  val netAddr = state.schedulerFiber.workers(wid).netAddr.get
+                  queue.offer(
+                    new WorkerFiberEvents.Initialized(netAddr)
+                  )
                 }
-              }
-          }
-          .map(s => s.schedulerFiber.workers)
-
-        // if all workers are initialized, emit Initialized event to main fiber,
-        // and change state to Idle.
-        _ <- IO.whenA(workerStates.forall { case (wid, state) => state.initialized })(
-          for {
-            state <- stateR.updateAndGet { s =>
-              s.focus(_.schedulerFiber.state).replace(SchedulerState.Idle)
-            }
-            _ <- logger.debug("all workers initialized")
-            _ <- mainFiberQueue.offer(new MainFiberEvents.Initialized(state.schedulerFiber.files))
-          } yield ()
-        )
+              } yield ()
+            )
+          else
+            rpcServerFiberQueue.offer(
+              new RpcServerFiberEvents.AllWorkersInitialized(
+                getReplicatorAddresses(state.schedulerFiber.workers)
+              )
+            )
       } yield ()
 
     case Halt(errMsg, from) =>
@@ -355,4 +376,68 @@ object SchedulerFiber {
     workerStates.foldLeft(Seq[Tuple2[JobSpec, JobResult]]()) { case (acc, (_, state)) =>
       acc ++ state.completedJobs.toSeq.map(job => (job.spec, job.result.get))
     }
+
+  def tryResolvingWorkerID(workerStates: Map[Wid, WorkerState], hello: WorkerHello): Option[Wid] = {
+    // check if worker is already registered
+    val entryOption = workerStates.find { case (_, state) =>
+      state.netAddr == new NetAddr(hello.ip, hello.port)
+    }
+    entryOption match {
+      case Some(entry) => Some(entry._1) // already registered, just return its wid
+      case None        => {
+        // new worker registration, try finding empty wid
+        val newEntryOption = workerStates.filter(_._1.wtid == hello.wtid).find { case (_, state) =>
+          !state.initialized
+        }
+        newEntryOption match {
+          case Some(newEntry) => Some(newEntry._1)
+          case None           => None // invalid registration
+        }
+      }
+    }
+  }
+
+  def initializeWorkerState(
+      sharedState: SharedState,
+      wid: Wid,
+      hello: WorkerHello
+  ): SharedState = {
+    // update worker state
+    val workerState = sharedState.schedulerFiber.workers(wid)
+    val updatedWorkerState = workerState
+      .focus(_.netAddr)
+      .replace(Some(new NetAddr(hello.ip, hello.port)))
+      .focus(_.status)
+      .replace(WorkerStatus.Up)
+      .focus(_.initialized)
+      .replace(true)
+    val updatedWorkerStates = sharedState.schedulerFiber.workers.updated(wid, updatedWorkerState)
+
+    // also update file entries
+    val fileEntries = hello.storageInfo match {
+      case Some(info) =>
+        info.entries.view
+          .mapValues(
+            FileEntry.fromMsg(_).focus(_.replicas).replace(Seq(wid.mid))
+          ) // set mid as only replica of input files.
+          .to(Map)
+      case None => sharedState.schedulerFiber.files.getOrElse(wid.mid, Map())
+    }
+    val updatedFiles = sharedState.schedulerFiber.files.updated(wid.mid, fileEntries)
+
+    sharedState
+      .focus(_.schedulerFiber.workers)
+      .replace(updatedWorkerStates)
+      .focus(_.schedulerFiber.files)
+      .replace(updatedFiles)
+  }
+
+  def getReplicatorAddresses(workerStates: Map[Wid, WorkerState]): Map[Mid, NetAddr] =
+    workerStates.view
+      .mapValues(_.netAddr.get)
+      .filter { case (wid, _) => wid.wtid == 0 }
+      .map { case (wid, netAddr) =>
+        (wid.mid, new NetAddr(netAddr.ip, netAddr.port - 1))
+      }
+      .toMap
 }
