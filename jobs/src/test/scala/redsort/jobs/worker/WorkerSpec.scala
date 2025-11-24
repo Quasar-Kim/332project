@@ -28,7 +28,8 @@ class WorkerSpec extends AsyncSpec {
       IO.pure(
         new SchedulerHello(
           mid = 1,
-          replicatorAddrs = replicators
+          replicatorAddrs = replicators,
+          success = true
         )
       )
     )
@@ -77,9 +78,9 @@ class WorkerSpec extends AsyncSpec {
     } yield (worker, grpc)
   }
 
-  behavior of "Worker.apply"
+  behavior of "Worker.registerWorkerToScheduler"
 
-  "Worker.registerWorkerToScheduler" should "call RegisterWorker RPC method" in {
+  it should "call RegisterWorker RPC method and update state if registration was successful" in {
     val f = fixture
 
     for {
@@ -117,6 +118,39 @@ class WorkerSpec extends AsyncSpec {
 
       state.replicatorAddrs should be(f.replicators.view.mapValues(NetAddr.fromMsg(_)).toMap)
       state.wid should be(Some(new Wid(1, 0)))
+    }
+  }
+
+  it should "raise error if registration was not successful" in {
+    val f = fixture
+    (f.schedulerClientStub.registerWorker _).returnsWith(
+      IO.pure(
+        new SchedulerHello(
+          success = false,
+          failReason = "some error"
+        )
+      )
+    )
+
+    for {
+      stateR <- SharedState.init
+      result <- Worker
+        .registerWorkerToScheduler(
+          schedulerClient = f.schedulerClientStub,
+          stateR = stateR,
+          wtid = 0,
+          port = 5000,
+          dirs = f.dirs,
+          ctx = f.ctxStub
+        )
+        .attempt
+        .timeout(1.second)
+      state <- stateR.get
+    } yield {
+      result match {
+        case Left(err)    => err.getMessage() should include("some error")
+        case Right(value) => throw new AssertionError("got Right while expecting Left")
+      }
     }
   }
 

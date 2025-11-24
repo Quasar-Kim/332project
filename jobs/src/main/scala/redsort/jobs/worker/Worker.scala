@@ -114,6 +114,9 @@ object Worker {
 
       // do registration
       schedulerHello <- schedulerClient.registerWorker(workerHello, new Metadata)
+      _ <- IO.raiseUnless(schedulerHello.success)(
+        new RuntimeException(s"worker registration failed: ${schedulerHello.failReason}")
+      )
 
       // update state according to SchedulerHello
       wid <- IO.pure(new Wid(schedulerHello.mid, wtid))
