@@ -9,7 +9,7 @@ import "google/protobuf/empty.proto";
 
 /* RPC service called by local workers. 
    Provide Push() method to replicate file to another machine, and Pull() method to do the inverse. 
-   Replicator invokes RPC method of `REplicationRemoteServicer` of remote replicator to transmit data. */
+   Replicator invokes RPC method of `ReplicationRemoteService` of remote replicator to transmit data. */
 service ReplicatorLocalService {
   rpc Push(PushRequest) returns (ReplicationResult);
   rpc Pull(PullRequest) returns (ReplicationResult);
@@ -18,7 +18,7 @@ service ReplicatorLocalService {
 /* RPC service called remote workers. */
 service ReplicatorRemoteService {
   rpc Read(ReadRequest) returns (stream Packet);
-  rpc Write(stream WriteRequest) returns (google.protobuf.Empty);  
+  rpc Write(stream WriteRequest) returns (google.protobuf.Empty);
 }
 
 message PushRequest {
@@ -37,19 +37,35 @@ message ReplicationResult {
   optional ReplicationStats stats = 3;
 }
 
-// TODO
 enum ReplicationErrorKind {
   UNKNOWN_ERROR = 0;
+  FILE_NOT_FOUND_ERROR = 1;
+  FILE_ALREADY_EXISTS_ERROR = 2;
+  NETWORK_TIMEOUT_ERROR = 3;
+  CONNECTION_ERROR = 4;
+  INSUFFICIENT_STORAGE_ERROR = 5;
 }
 
-// TODO
-message ReplicationStats {}
+message ReplicationStats {
+  string path = 1;
+  int32 src = 2;
+  int32 dst = 3;
+  int64 start = 4;
+  int64 end = 5;
+  int64 bytes_transferred = 6;
+}
 
-// TODO
-message ReadRequest {}
+message ReadRequest {
+  string path = 1;
+  int32 src = 2;
+}
 
-// TODO
-message WriteRequest {}
+message WriteRequest {
+  string path = 1;
+  int32 dst = 2;
+  bytes data = 3;
+}
 
-// TODO
-message Packet {}
+message Packet {
+  bytes data = 3;
+}
