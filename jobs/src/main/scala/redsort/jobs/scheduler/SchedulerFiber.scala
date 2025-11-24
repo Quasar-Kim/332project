@@ -18,6 +18,8 @@ import redsort.jobs.messages.JobResult
 import redsort.jobs.scheduler.SchedulerFiberEvents.JobFailed
 import org.log4s._
 import redsort.jobs.SourceLogger
+import redsort.jobs.scheduler.SchedulerFiberEvents.Complete
+import redsort.jobs.scheduler.SchedulerFiberEvents.WorkerCompleted
 
 /** Scheduler fiber.
   */
@@ -245,13 +247,39 @@ object SchedulerFiber {
 
     case JobFailed(result, from) => {
       for {
-        _ <- IO(
-          logger.error(s"$from failed to run job, reason: ${result.error.get.inner.get.message}")
-        )
+        _ <- logger.error(s"$from failed to run job, reason: ${result.error.get.inner.get.message}")
         spec <- stateR.get.map(_.schedulerFiber.workers(from).runningJob.get.spec)
         _ <- mainFiberQueue.offer(new MainFiberEvents.JobFailed(spec = spec, result = result))
       } yield ()
     }
+
+    case Complete() =>
+      for {
+        _ <- logger.info("shutting down cluster...")
+
+        // send Complete events to all worker fibers
+        _ <- rpcClientFiberQueues.values.toList.traverse { queue =>
+          queue.offer(WorkerFiberEvents.Complete)
+        }
+      } yield ()
+
+    case WorkerCompleted(from) =>
+      for {
+        _ <- logger.debug(s"worker $from shutted down")
+
+        // record worker as completed
+        state <- stateR.updateAndGet { s =>
+          s.focus(_.schedulerFiber.workers).at(from).modify {
+            case Some(ws) => Some(ws.focus(_.completed).replace(true))
+            case None     => None
+          }
+        }
+
+        // if all workers are completed, then send CopmleteDone event to main fiber
+        _ <- IO.whenA(state.schedulerFiber.workers.forall(_._2.completed))(
+          mainFiberQueue.offer(MainFiberEvents.CompleteDone)
+        )
+      } yield ()
 
     case _ => IO.raiseError(new NotImplementedError)
   }

@@ -52,6 +52,7 @@ object Worker {
 
       // start RPC server on the background
       supervisor <- Supervisor[IO]
+      completed <- IO.deferred[Unit].toResource
       _ <- Resource.eval {
         supervisor.supervise(
           WorkerServerFiber
@@ -61,7 +62,8 @@ object Worker {
               handlers = handlerMap,
               dirs = dirs,
               ctx = ctx,
-              logger = logger
+              logger = logger,
+              completed = completed
             )
             .useForever
         )
@@ -75,7 +77,7 @@ object Worker {
       wid <- registerWorkerToScheduler(schedulerClient, stateR, wtid, port, dirs, ctx).toResource
     } yield new Worker {
       override def waitForComplete: IO[Unit] =
-        notImplmenetedIO
+        completed.get
     }
 
   def createWorkingDir(ctx: FileStorage): IO[Path] = {

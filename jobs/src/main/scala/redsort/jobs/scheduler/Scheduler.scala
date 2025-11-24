@@ -17,6 +17,7 @@ import redsort.jobs.SourceLogger
 import redsort.jobs.messages.FileEntryMsg
 import redsort.jobs.JobSystemException
 import redsort.jobs.messages.WorkerErrorKind.BODY_ERROR
+import redsort.jobs.scheduler
 
 /** A frontend of job scheduling system.
   */
@@ -37,6 +38,13 @@ trait Scheduler {
     *   a sequence of tuple of each job specifications and its result.
     */
   def runJobs(specs: Seq[JobSpec], sync: Boolean = true): IO[JobExecutionResult]
+
+  /** Signal workers to shutdown. Call this method right before exiting your program. This method
+    * does NOT wait for workers to shutdown.
+    *
+    * @return
+    */
+  def complete: IO[Unit]
 }
 
 final case class JobExecutionResult(
@@ -151,6 +159,15 @@ object Scheduler {
             case _                      => unreachableIO[JobExecutionResult]
           }
         } yield result
+
+      override def complete: IO[Unit] =
+        for {
+          _ <- schedulerFiberQueue.offer(new SchedulerFiberEvents.Complete)
+          evt <- mainFiberQueue.take
+        } yield {
+          assert(evt == MainFiberEvents.CompleteDone)
+          ()
+        }
     }
   }
 

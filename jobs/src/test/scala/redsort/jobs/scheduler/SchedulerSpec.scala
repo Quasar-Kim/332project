@@ -24,6 +24,7 @@ import redsort.jobs.messages.JobSystemError
 import redsort.jobs.messages.HaltRequest
 import redsort.jobs.messages.WidMsg
 import redsort.jobs.JobSystemException
+import com.google.protobuf.empty.Empty
 
 class SchedulerSpec extends AsyncSpec {
   def fixture = new {
@@ -372,6 +373,26 @@ class SchedulerSpec extends AsyncSpec {
             case Left(error) => error shouldBe a[JobSystemException]
             case Right(_)    => fail("runJobs did not returned error")
           }
+        }
+      }
+      .timeout(1.second)
+  }
+
+  behavior of "scheduler.complete"
+
+  it should "call complete RPC method of worker" in {
+    val f = fixture
+    (f.workerRpcClientStub.complete _).returnsWith(IO(new Empty))
+
+    f.schedulerAndServer
+      .use { case (scheduler, grpc) =>
+        for {
+          // init workers
+          _ <- f.initAll(grpc)
+          _ <- scheduler.waitInit
+          _ <- scheduler.complete
+        } yield {
+          (f.workerRpcClientStub.complete _).calls.length should be(4)
         }
       }
       .timeout(1.second)

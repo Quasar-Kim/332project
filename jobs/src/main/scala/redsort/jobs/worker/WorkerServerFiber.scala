@@ -25,7 +25,8 @@ object WorkerRpcService {
   def init(
       stateR: Ref[IO, SharedState],
       jobRunner: JobRunner,
-      logger: SourceLogger
+      logger: SourceLogger,
+      completed: Deferred[IO, Unit]
   ): WorkerFs2Grpc[IO, Metadata] =
     new WorkerFs2Grpc[IO, Metadata] {
       override def runJob(spec: JobSpecMsg, ctx: Metadata): IO[JobResult] =
@@ -43,9 +44,13 @@ object WorkerRpcService {
             .guarantee(stateR.set(state.focus(_.runningJob).replace(false)))
         } yield result
 
-      // TODO
       override def halt(request: JobSystemError, ctx: Metadata): IO[Empty] =
         IO.raiseError(JobSystemException.fromMsg(request))
+
+      override def complete(request: Empty, ctx: Metadata): IO[Empty] =
+        for {
+          _ <- completed.complete(())
+        } yield new Empty
     }
 }
 
@@ -56,7 +61,8 @@ object WorkerServerFiber {
       handlers: Map[String, JobHandler],
       dirs: Directories,
       ctx: WorkerCtx,
-      logger: SourceLogger
+      logger: SourceLogger,
+      completed: Deferred[IO, Unit]
   ): Resource[IO, Server] =
     for {
       _ <- logger.debug("worker RPC server started").toResource
@@ -65,7 +71,8 @@ object WorkerServerFiber {
         .toResource
       server <- ctx
         .workerRpcServer(
-          WorkerRpcService.init(stateR = stateR, jobRunner = jobRunner, logger = logger),
+          WorkerRpcService
+            .init(stateR = stateR, jobRunner = jobRunner, logger = logger, completed = completed),
           port
         )
         .evalMap(server => IO(server.start()))

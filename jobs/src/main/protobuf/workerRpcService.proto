@@ -16,6 +16,9 @@ service Worker {
 
   /* Halt worker in case of fatal system error. */
   rpc Halt(JobSystemError) returns (google.protobuf.Empty);
+
+  /* Exit worker on completion. */
+  rpc Complete(google.protobuf.Empty) returns (google.protobuf.Empty);
 }
 
 /* Job execution result. */

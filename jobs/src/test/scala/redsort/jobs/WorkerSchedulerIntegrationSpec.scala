@@ -90,7 +90,7 @@ class WorkerSchedulerIntegrationSpec extends AsyncFunSpec with BeforeAndAfterEac
   override val timeLimit = 10.seconds
 
   def fixture = new {
-    def worker(handlerMap: Map[String, JobHandler]) = for {
+    def getWorker(handlerMap: Map[String, JobHandler]) = for {
       fs <- Ref.of[IO, Map[String, Array[Byte]]](Map()).toResource
       worker <- Worker(
         handlerMap = handlerMap,
@@ -101,7 +101,7 @@ class WorkerSchedulerIntegrationSpec extends AsyncFunSpec with BeforeAndAfterEac
         port = 6000,
         ctx = new WorkerTestCtx(fs)
       )
-    } yield ()
+    } yield worker
 
     val getScheduler = Scheduler(
       port = 5000,
@@ -118,7 +118,7 @@ class WorkerSchedulerIntegrationSpec extends AsyncFunSpec with BeforeAndAfterEac
         // XXX: why Resource.eval only works?
         // spawn worker in background
         supervisor <- Supervisor[IO]
-        _ <- Resource.eval(supervisor.supervise(f.worker(Map()).useForever))
+        _ <- Resource.eval(supervisor.supervise(f.getWorker(Map()).useForever))
 
         // start scheduler and wait for registration
         scheduler <- f.getScheduler
@@ -143,7 +143,7 @@ class WorkerSchedulerIntegrationSpec extends AsyncFunSpec with BeforeAndAfterEac
       val res = for {
         // spawn worker in background
         supervisor <- Supervisor[IO]
-        _ <- Resource.eval(supervisor.supervise(f.worker(handlers).useForever))
+        _ <- Resource.eval(supervisor.supervise(f.getWorker(handlers).useForever))
         scheduler <- f.getScheduler
         _ <- scheduler.waitInit.toResource
 
@@ -172,7 +172,7 @@ class WorkerSchedulerIntegrationSpec extends AsyncFunSpec with BeforeAndAfterEac
       val res = for {
         // spawn worker in background
         supervisor <- Supervisor[IO]
-        _ <- Resource.eval(supervisor.supervise(f.worker(handlers).useForever))
+        _ <- Resource.eval(supervisor.supervise(f.getWorker(handlers).useForever))
         scheduler <- f.getScheduler
         _ <- scheduler.waitInit.toResource
 
@@ -203,7 +203,7 @@ class WorkerSchedulerIntegrationSpec extends AsyncFunSpec with BeforeAndAfterEac
       val res = for {
         // spawn worker in background
         supervisor <- Supervisor[IO]
-        _ <- Resource.eval(supervisor.supervise(f.worker(handlers).useForever))
+        _ <- Resource.eval(supervisor.supervise(f.getWorker(handlers).useForever))
         scheduler <- f.getScheduler
         _ <- scheduler.waitInit.toResource
 
@@ -214,6 +214,25 @@ class WorkerSchedulerIntegrationSpec extends AsyncFunSpec with BeforeAndAfterEac
         result.results(0)._2.success should be(true)
         result.results(0)._2.retval.get should be(buffer)
       }
+      res.use(_ => IO.unit).timeout(10.second)
+    }
+  }
+
+  test("completion", NetworkTest) {
+    val f = fixture
+
+    fileLogger("completion").use { _ =>
+      val res = for {
+        scheduler <- f.getScheduler
+        worker <- f.getWorker(Map())
+        _ <- scheduler.waitInit.toResource
+
+        // run job and get result
+        _ <- (
+          worker.waitForComplete.toResource,
+          scheduler.complete.toResource
+        ).parMapN((_, _) => ())
+      } yield ()
       res.use(_ => IO.unit).timeout(10.second)
     }
   }
@@ -233,7 +252,7 @@ class WorkerSchedulerIntegrationSpec extends AsyncFunSpec with BeforeAndAfterEac
       val res = for {
         // spawn worker in background
         supervisor <- Supervisor[IO]
-        _ <- Resource.eval(supervisor.supervise(f.worker(handlers).useForever))
+        _ <- Resource.eval(supervisor.supervise(f.getWorker(handlers).useForever))
         scheduler <- f.getScheduler
         _ <- scheduler.waitInit.toResource
 
