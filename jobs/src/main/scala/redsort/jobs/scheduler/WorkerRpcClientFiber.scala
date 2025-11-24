@@ -12,6 +12,7 @@ import redsort.jobs.context.interface.WorkerRpcClient
 import redsort.jobs.scheduler
 import org.log4s._
 import redsort.jobs.SourceLogger
+import com.google.protobuf.empty.Empty
 
 object WorkerRpcClientFiber {
   private[this] val logger = new SourceLogger(getLogger, "scheduler")
@@ -62,6 +63,14 @@ object WorkerRpcClientFiber {
           else new SchedulerFiberEvents.JobFailed(result, wid)
         )
       } yield ()
-    case _ => ???
+
+    case WorkerFiberEvents.Complete =>
+      for {
+        _ <- logger.debug(s"shutting down worker $wid")
+        _ <- rpcClient.complete(new Empty, new Metadata)
+        _ <- schedulerFiberQueue.offer(new SchedulerFiberEvents.WorkerCompleted(from = wid))
+      } yield ()
+
+    case _ => notImplmenetedIO
   }
 }

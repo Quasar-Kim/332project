@@ -631,4 +631,49 @@ class SchedulerFiberSpec extends AsyncSpec {
 
   // it should "detect fault and reschedule job"
 
+  behavior of "SchedulerFiber (upon receiving Complete)"
+
+  it should "send complete event to worker RPC client fibers, wait for WorkerCompleted events, and finally send CompleteDone event to main fiber" in {
+    val f = fixture
+
+    f.startSchedulerFiber
+      .use { case (stateR, mainFiberQueue, schedulerFiberQueue, rpcClientFiberQueues) =>
+        for {
+          _ <- f.initAll(stateR, mainFiberQueue, schedulerFiberQueue)
+
+          // enqueue Complete event
+          _ <- schedulerFiberQueue.offer(new SchedulerFiberEvents.Complete)
+          evtA <- rpcClientFiberQueues(new Wid(0, 0)).take
+          evtB <- rpcClientFiberQueues(new Wid(0, 1)).take
+          evtC <- rpcClientFiberQueues(new Wid(1, 0)).take
+          evtD <- rpcClientFiberQueues(new Wid(1, 1)).take
+          _ <- IO {
+            evtA should be(WorkerFiberEvents.Complete)
+            evtB should be(WorkerFiberEvents.Complete)
+            evtC should be(WorkerFiberEvents.Complete)
+            evtD should be(WorkerFiberEvents.Complete)
+          }
+
+          // offer WorkerCompleted events back to scheduler fiber
+          _ <- schedulerFiberQueue.offer(
+            new SchedulerFiberEvents.WorkerCompleted(from = new Wid(0, 0))
+          )
+          _ <- schedulerFiberQueue.offer(
+            new SchedulerFiberEvents.WorkerCompleted(from = new Wid(0, 1))
+          )
+          _ <- schedulerFiberQueue.offer(
+            new SchedulerFiberEvents.WorkerCompleted(from = new Wid(1, 0))
+          )
+          _ <- schedulerFiberQueue.offer(
+            new SchedulerFiberEvents.WorkerCompleted(from = new Wid(1, 1))
+          )
+
+          // wait for CompleteDone event
+          evt <- mainFiberQueue.take
+        } yield {
+          evt should be(MainFiberEvents.CompleteDone)
+        }
+      }
+      .timeout(1.second)
+  }
 }

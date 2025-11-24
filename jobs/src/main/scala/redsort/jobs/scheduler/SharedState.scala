@@ -98,7 +98,8 @@ final case class WorkerState(
     pendingJobs: Queue[Job],
     runningJob: Option[Job],
     completedJobs: Queue[Job],
-    initialized: Boolean
+    initialized: Boolean,
+    completed: Boolean
 )
 
 object WorkerState {
@@ -109,7 +110,8 @@ object WorkerState {
     pendingJobs = Queue(),
     runningJob = None,
     completedJobs = Queue(),
-    initialized = false
+    initialized = false,
+    completed = false
   )
 }
 
@@ -199,7 +201,7 @@ object RpcServerFiberState {
   */
 sealed abstract class SchedulerFiberEvents
 object SchedulerFiberEvents {
-  // == sent by `runJobs`:
+  // == sent by main fiber:
 
   /** Distributed program requested execution of jobs.
     *
@@ -207,6 +209,10 @@ object SchedulerFiberEvents {
     *   list of job specs.
     */
   final case class Jobs(specs: Seq[JobSpec]) extends SchedulerFiberEvents
+
+  /** Shut down workers.
+    */
+  final case class Complete() extends SchedulerFiberEvents
 
   // == sent by RPC server fiber:
 
@@ -263,6 +269,10 @@ object SchedulerFiberEvents {
     */
   final case class WorkerNotResponding(from: Wid) extends SchedulerFiberEvents
 
+  /** Successfully called Complete() RPC method of worker.
+    */
+  final case class WorkerCompleted(from: Wid) extends SchedulerFiberEvents
+
   // == can be sent by anyone:
 
   /** Some component of scheduler system failed.
@@ -280,6 +290,7 @@ object WorkerFiberEvents {
   final case class Job(spec: JobSpec) extends WorkerFiberEvents
   final case object WorkerDown extends WorkerFiberEvents
   final case object WorkerUp extends WorkerFiberEvents
+  final case object Complete extends WorkerFiberEvents
 }
 
 /** Events that main fiber (where `Scheduler` object is) receives.
@@ -293,4 +304,5 @@ object MainFiberEvents {
   ) extends MainFiberEvents
   final case class JobFailed(spec: JobSpec, result: msg.JobResult) extends MainFiberEvents
   final case class SystemException(error: Throwable) extends MainFiberEvents
+  final case object CompleteDone extends MainFiberEvents
 }

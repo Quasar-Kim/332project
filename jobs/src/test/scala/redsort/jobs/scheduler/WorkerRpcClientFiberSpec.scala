@@ -14,6 +14,7 @@ import scala.concurrent.duration._
 import redsort.jobs.messages.WorkerError
 import redsort.jobs.messages.WorkerErrorKind
 import redsort.jobs.messages.JobSystemError
+import com.google.protobuf.empty.Empty
 
 class WorkerRpcClientFiberSpec extends AsyncSpec {
   def fixture =
@@ -74,7 +75,7 @@ class WorkerRpcClientFiberSpec extends AsyncSpec {
 
   val wid = new Wid(0, 0)
 
-  behavior of "scheduler fiber (upon receiving Job(spec))"
+  behavior of "worker RPC client fiber (upon receiving Job(spec))"
 
   it should "request worker to run the job" in {
     val f = fixture
@@ -143,6 +144,29 @@ class WorkerRpcClientFiberSpec extends AsyncSpec {
         from should equal(wid)
       }
     }
+  }
+
+  behavior of "worker RPC client fiber (upon receiving Complete)"
+
+  it should "call Complete RPC method of worker and enqueue WorkerCompleted event to scheduler fiber" in {
+    val f = fixture
+    (f.workerfs2GrpcStub.complete _).returnsWith(IO(new Empty))
+
+    val io = for {
+      stateR <- f.sharedState
+      inputQueue <- f.inputQueue
+      schedulerFiberQueue <- f.schedulerFiberQueue
+      evt <- WorkerRpcClientFiber
+        .start(stateR, wid, inputQueue, schedulerFiberQueue, f.ctxStub)
+        .use { _ =>
+          inputQueue.offer(WorkerFiberEvents.Complete) >>
+            schedulerFiberQueue.take
+        }
+    } yield {
+      evt should be(new SchedulerFiberEvents.WorkerCompleted(wid))
+      (f.workerfs2GrpcStub.complete _).calls.length should be > 0
+    }
+    io.timeout(1.second)
   }
 
   // it should "flush messages until WorkerUp if WorkerDown was received before getting job result back" in {}
