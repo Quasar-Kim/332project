@@ -18,18 +18,21 @@ import scala.concurrent.duration._
 import redsort.jobs.messages.HaltRequest
 import redsort.jobs.messages.LocalStorageInfo
 import redsort.jobs.messages.FileEntryMsg
+import monocle.syntax.all._
+import scala.collection.immutable
 
 class RpcServerFiberSpec extends AsyncSpec {
   def fixture = new {
-    val workerAddrs = Map(
-      new Wid(0, 0) -> new NetAddr("1.1.1.1", 5000),
-      new Wid(0, 1) -> new NetAddr("1.1.1.1", 5001),
-      new Wid(1, 0) -> new NetAddr("1.1.1.2", 5000),
-      new Wid(1, 1) -> new NetAddr("1.1.1.2", 5001)
+    val wids = Seq(
+      new Wid(0, 0),
+      new Wid(0, 1),
+      new Wid(1, 0),
+      new Wid(1, 1)
     )
-    val sharedState = SharedState.init(workerAddrs)
+    val sharedState = SharedState.init(wids)
 
-    val schedulerFiberQueue = Queue.unbounded[IO, SchedulerFiberEvents]
+    val getSchedulerFiberQueue = Queue.unbounded[IO, SchedulerFiberEvents]
+    val getRpcServerFiberQueue = Queue.unbounded[IO, RpcServerFiberEvents]
     val serverStub = stub[Server]
     (serverStub.start _).returnsWith(serverStub)
     val ctxStub = stub[SchedulerRpcServer]
@@ -37,7 +40,8 @@ class RpcServerFiberSpec extends AsyncSpec {
     val grpc = Supervisor[IO].evalMap(sv =>
       for {
         stateR <- sharedState
-        schedulerFiberQueue <- schedulerFiberQueue
+        schedulerFiberQueue <- getSchedulerFiberQueue
+        rpcServerFiberQueue <- getRpcServerFiberQueue
         grpcDeferred <- IO.deferred[SchedulerFs2Grpc[IO, Metadata]]
         _ <- IO((ctxStub.schedulerRpcServer _).returns { case (grpc, port) =>
           Resource.eval(grpcDeferred.complete(grpc) >> IO(serverStub))
@@ -45,12 +49,12 @@ class RpcServerFiberSpec extends AsyncSpec {
         _ <- sv
           .supervise(
             RpcServerFiber
-              .start(5000, stateR, schedulerFiberQueue, ctxStub, workerAddrs)
+              .start(5000, stateR, schedulerFiberQueue, ctxStub, rpcServerFiberQueue)
               .useForever
           )
           .void
         grpc <- grpcDeferred.get
-      } yield (grpc, schedulerFiberQueue)
+      } yield (stateR, grpc, schedulerFiberQueue, rpcServerFiberQueue)
     )
 
     val metadata = new Metadata()
@@ -61,6 +65,49 @@ class RpcServerFiberSpec extends AsyncSpec {
       ip = "1.1.1.2",
       port = 5000
     )
+
+    val initializedWorkerStates = Map(
+      new Wid(0, 0) -> new WorkerState(
+        wid = new Wid(0, 0),
+        netAddr = Some(new NetAddr("1.1.1.1", 5000)),
+        status = WorkerStatus.Up,
+        pendingJobs = immutable.Queue(),
+        runningJob = None,
+        completedJobs = immutable.Queue(),
+        initialized = true,
+        completed = false
+      ),
+      new Wid(0, 1) -> new WorkerState(
+        wid = new Wid(0, 1),
+        netAddr = Some(new NetAddr("1.1.1.1", 5001)),
+        status = WorkerStatus.Up,
+        pendingJobs = immutable.Queue(),
+        runningJob = None,
+        completedJobs = immutable.Queue(),
+        initialized = true,
+        completed = false
+      ),
+      new Wid(1, 0) -> new WorkerState(
+        wid = new Wid(1, 0),
+        netAddr = Some(new NetAddr("1.1.1.2", 5000)),
+        status = WorkerStatus.Up,
+        pendingJobs = immutable.Queue(),
+        runningJob = None,
+        completedJobs = immutable.Queue(),
+        initialized = true,
+        completed = false
+      ),
+      new Wid(1, 1) -> new WorkerState(
+        wid = new Wid(0, 0),
+        netAddr = Some(new NetAddr("1.1.1.2", 5001)),
+        status = WorkerStatus.Up,
+        pendingJobs = immutable.Queue(),
+        runningJob = None,
+        completedJobs = immutable.Queue(),
+        initialized = true,
+        completed = false
+      )
+    )
   }
 
   behavior of "server fiber (when RegisterWorker called)"
@@ -69,35 +116,75 @@ class RpcServerFiberSpec extends AsyncSpec {
     val f = fixture
 
     f.grpc
-      .use { case (grpc, schedulerFiberQueue) =>
+      .use { case (stateR, grpc, schedulerFiberQueue, _) =>
         for {
-          _ <- grpc.registerWorker(f.workerHello, f.metadata)
+          _ <- grpc.registerWorker(f.workerHello, f.metadata).timeout(100.millis).attempt
           event <- schedulerFiberQueue.take
         } yield {
-          inside(event) { case SchedulerFiberEvents.WorkerRegistration(hello, from) =>
+          inside(event) { case SchedulerFiberEvents.WorkerRegistration(hello) =>
             hello should equal(f.workerHello)
-            from should equal(f.wid)
           }
         }
       }
       .timeout(1.seconds)
   }
 
-  it should "reply with SchedulerHello" in {
+  it should "reply with SchedulerHello when AllWorkersInitialized events are received" in {
     val f = fixture
+    val replicatorAddrs = Map(
+      0 -> new NetAddr("1.1.1.1", 4999),
+      1 -> new NetAddr("1.1.1.2", 4999)
+    )
 
     f.grpc
-      .use { case (grpc, schedulerFiberQueue) =>
+      .use { case (stateR, grpc, schedulerFiberQueue, rpcServerFiberQueue) =>
         for {
+          _ <- stateR.update { state =>
+            state
+              .focus(_.schedulerFiber.workers)
+              .replace(f.initializedWorkerStates)
+          }
+          _ <- rpcServerFiberQueue.offer(
+            new RpcServerFiberEvents.AllWorkersInitialized(replicatorAddrs)
+          )
           schedulerHello <- grpc.registerWorker(f.workerHello, f.metadata)
         } yield {
           schedulerHello.mid should equal(f.wid.mid)
-          schedulerHello.replicatorAddrs should equal(
-            Map(
-              0 -> new NetAddrMsg("1.1.1.1", 4999),
-              1 -> new NetAddrMsg("1.1.1.2", 4999)
-            )
+          schedulerHello.replicatorAddrs.view.mapValues(NetAddr.fromMsg(_)).toMap should equal(
+            replicatorAddrs
           )
+        }
+      }
+      .timeout(1.seconds)
+  }
+
+  it should "reply with failing SchedulerHello when AllWorkersInitialized event is received and worker netAddr is not in worker shared state" in {
+    val f = fixture
+    val replicatorAddrs = Map(
+      0 -> new NetAddr("1.1.1.1", 4999),
+      1 -> new NetAddr("1.1.1.2", 4999)
+    )
+    val badWorkerHello = new WorkerHello(
+      wtid = 0,
+      storageInfo = None,
+      ip = "1.1.1.110",
+      port = 5000
+    )
+
+    f.grpc
+      .use { case (stateR, grpc, schedulerFiberQueue, rpcServerFiberQueue) =>
+        for {
+          _ <- stateR.update { state =>
+            state
+              .focus(_.schedulerFiber.workers)
+              .replace(f.initializedWorkerStates)
+          }
+          _ <- rpcServerFiberQueue.offer(
+            new RpcServerFiberEvents.AllWorkersInitialized(replicatorAddrs)
+          )
+          schedulerHello <- grpc.registerWorker(badWorkerHello, f.metadata)
+        } yield {
+          schedulerHello.success should be(false)
         }
       }
       .timeout(1.seconds)
@@ -123,7 +210,7 @@ class RpcServerFiberSpec extends AsyncSpec {
     )
 
     f.grpc
-      .use { case (grpc, schedulerFiberQueue) =>
+      .use { case (stateR, grpc, schedulerFiberQueue, _) =>
         for {
           _ <- grpc.haltOnError(req, f.metadata)
           evt <- schedulerFiberQueue.take

@@ -12,7 +12,7 @@ import cats.effect.std.Queue
 import redsort.jobs.context.SchedulerCtx
 import redsort.jobs.context.interface.SchedulerRpcServer
 import redsort.jobs.Common._
-import redsort.jobs.scheduler
+import redsort.jobs.scheduler.RpcServerFiberEvents._
 import org.log4s._
 import redsort.jobs.SourceLogger
 
@@ -37,7 +37,7 @@ object SchedulerRpcService {
       stateR: Ref[IO, SharedState],
       schedulerFiberQueue: Queue[IO, SchedulerFiberEvents],
       ctx: SchedulerRpcServer,
-      workerAddrs: Map[Wid, NetAddr]
+      inputQueue: Queue[IO, RpcServerFiberEvents]
   ): SchedulerFs2Grpc[IO, Metadata] =
     new SchedulerFs2Grpc[IO, Metadata] {
       override def haltOnError(req: HaltRequest, meta: Metadata): IO[Empty] = for {
@@ -52,26 +52,52 @@ object SchedulerRpcService {
       // NOTE: this method should be ALSO considered as heartbeat message,
       // otherwise in case where some event that triggers reschedule arrives later than this message
       // can corrupt worker state.
-      override def registerWorker(hello: WorkerHello, meta: Metadata): IO[SchedulerHello] = for {
-        wid <- IO.pure(resolveWidFromNetAddr(workerAddrs, new NetAddr(hello.ip, hello.port)))
-        _ <- logger.info(s"Worker $wid registered")
-        _ <- schedulerFiberQueue.offer(new SchedulerFiberEvents.WorkerRegistration(hello, wid))
-      } yield {
+      override def registerWorker(hello: WorkerHello, meta: Metadata): IO[SchedulerHello] =
+        for {
+          netAddr <- IO.pure(new NetAddr(hello.ip, hello.port))
+          _ <- logger.info(s"new worker registration from $netAddr")
+          _ <- schedulerFiberQueue.offer(new SchedulerFiberEvents.WorkerRegistration(hello))
+
+          // wait for scheduler tells us that all workers are initialized
+          // then create SchedulerHello
+          evt <- inputQueue.take
+          state <- stateR.get
+          schedulerHello <- IO(evt match {
+            case AllWorkersInitialized(replictorAddrs) =>
+              buildSchedulerHello(state, replictorAddrs, netAddr)
+          })
+        } yield schedulerHello
+    }
+
+  def buildSchedulerHello(
+      state: SharedState,
+      replictorAddrs: Map[Mid, NetAddr],
+      netAddr: NetAddr
+  ): SchedulerHello = {
+    state.schedulerFiber.workers.find { case (wid, state) => state.netAddr.get == netAddr } match {
+      case Some((wid, _)) =>
         new SchedulerHello(
           mid = wid.mid,
-          replicatorAddrs = resolveReplicatorNetAddrs(workerAddrs)
+          replicatorAddrs = replictorAddrs.view.mapValues(NetAddr.toMsg(_)).toMap,
+          success = true
         )
-      }
+      case None =>
+        new SchedulerHello(
+          success = false,
+          failReason =
+            "invalid network address - maybe there are more workers than scheduler knows?"
+        )
     }
 
-  def resolveWidFromNetAddr(workerAddrs: Map[Wid, NetAddr], netAddr: NetAddr): Wid =
-    workerAddrs.find { case (_, addr) => addr == netAddr }.get._1
+  }
 
-  def resolveReplicatorNetAddrs(workerAddrs: Map[Wid, NetAddr]): Map[Int, NetAddrMsg] =
-    workerAddrs.filter { case (wid, _) => wid.wtid == 0 }.map { case (wid, netAddr) =>
-      (wid.mid, new NetAddrMsg(netAddr.ip, netAddr.port - 1))
-    }
-
+  def badSchedulerHello(reason: String): SchedulerHello =
+    new SchedulerHello(
+      mid = -1,
+      replicatorAddrs = Map(),
+      success = false,
+      failReason = reason
+    )
 }
 
 /* Fiber serving scheduler RPC service. */
@@ -98,12 +124,12 @@ object RpcServerFiber {
       stateR: Ref[IO, SharedState],
       schedulerFiberQueue: Queue[IO, SchedulerFiberEvents],
       ctx: SchedulerRpcServer,
-      workerAddrs: Map[Wid, NetAddr]
+      inputQueue: Queue[IO, RpcServerFiberEvents]
   ): Resource[IO, Server] =
     logger.debug("scheduler RPC server fiber started").toResource.flatMap { _ =>
       ctx
         .schedulerRpcServer(
-          SchedulerRpcService.init(stateR, schedulerFiberQueue, ctx, workerAddrs),
+          SchedulerRpcService.init(stateR, schedulerFiberQueue, ctx, inputQueue),
           port
         )
         .evalMap(server => IO(server.start()))

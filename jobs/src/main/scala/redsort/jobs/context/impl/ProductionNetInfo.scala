@@ -1,4 +1,4 @@
-package redosrt.jobs.context.impl
+package redsort.jobs.context.impl
 
 import redsort.jobs.context.interface.NetInfo
 import cats.effect._

@@ -19,7 +19,7 @@ import redsort.jobs.context.impl.ProductionSchedulerRpcServer
 import redsort.jobs.context.impl.InMemoryFileStorage
 import redsort.jobs.context.impl.ProductionWorkerRpcServer
 import redsort.jobs.context.impl.ProductionSchedulerRpcClient
-import redosrt.jobs.context.impl.ProductionNetInfo
+import redsort.jobs.context.impl.ProductionNetInfo
 import redsort.jobs.context.interface.ReplicatorLocalRpcClient
 import redsort.jobs.context.impl.ProductionReplicatorLocalRpcClient
 import redsort.jobs.worker.Worker
@@ -89,29 +89,30 @@ object FaultyJobHandler extends JobHandler {
 class WorkerSchedulerIntegrationSpec extends AsyncFunSpec with BeforeAndAfterEach {
   override val timeLimit = 10.seconds
 
-  def fixture = new {
+  def fixture(portOffset: Int) = new {
     def getWorker(handlerMap: Map[String, JobHandler]) = for {
       fs <- Ref.of[IO, Map[String, Array[Byte]]](Map()).toResource
       worker <- Worker(
         handlerMap = handlerMap,
-        masterAddr = new NetAddr("127.0.0.1", 5000),
+        masterAddr = new NetAddr("127.0.0.1", 5000 + portOffset),
         inputDirectories = Seq(),
         outputDirectory = Path("/output"),
         wtid = 0,
-        port = 6000,
+        port = 6000 + portOffset,
         ctx = new WorkerTestCtx(fs)
       )
     } yield worker
 
     val getScheduler = Scheduler(
-      port = 5000,
-      workers = Seq(Seq(new NetAddr("127.0.0.1", 6000))),
+      port = 5000 + portOffset,
+      numMachines = 1,
+      numWorkersPerMachine = 1,
       ctx = SchedulerTestCtx
     )
   }
 
   test("worker registration", NetworkTest) {
-    val f = fixture
+    val f = fixture(0)
 
     fileLogger("worker-registration").use { _ =>
       val res = for {
@@ -129,7 +130,7 @@ class WorkerSchedulerIntegrationSpec extends AsyncFunSpec with BeforeAndAfterEac
   }
 
   test("noop job execution without sync", NetworkTest) {
-    val f = fixture
+    val f = fixture(1)
 
     val handlers = Map("noop" -> NoopJobHandler)
     val jobSpec = new JobSpec(
@@ -158,7 +159,7 @@ class WorkerSchedulerIntegrationSpec extends AsyncFunSpec with BeforeAndAfterEac
   }
 
   test("noop job execution", NetworkTest) {
-    val f = fixture
+    val f = fixture(2)
 
     val handlers = Map("noop" -> NoopJobHandler)
     val jobSpec = new JobSpec(
@@ -186,8 +187,8 @@ class WorkerSchedulerIntegrationSpec extends AsyncFunSpec with BeforeAndAfterEac
     }
   }
 
-  test("job with args") {
-    val f = fixture
+  test("job with args", NetworkTest) {
+    val f = fixture(3)
 
     val handlers = Map("identity" -> IdentityJobHandler)
     val buffer = ByteString.copyFrom(Array(0xde, 0xad, 0xbe, 0xef).map(_.toByte))
@@ -219,7 +220,7 @@ class WorkerSchedulerIntegrationSpec extends AsyncFunSpec with BeforeAndAfterEac
   }
 
   test("completion", NetworkTest) {
-    val f = fixture
+    val f = fixture(4)
 
     fileLogger("completion").use { _ =>
       val res = for {
@@ -238,7 +239,7 @@ class WorkerSchedulerIntegrationSpec extends AsyncFunSpec with BeforeAndAfterEac
   }
 
   test("failing job execution", NetworkTest) {
-    val f = fixture
+    val f = fixture(5)
 
     val handlers = Map("faulty" -> FaultyJobHandler)
     val jobSpec = new JobSpec(

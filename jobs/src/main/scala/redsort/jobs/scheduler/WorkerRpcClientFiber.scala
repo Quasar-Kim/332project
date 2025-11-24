@@ -13,6 +13,7 @@ import redsort.jobs.scheduler
 import org.log4s._
 import redsort.jobs.SourceLogger
 import com.google.protobuf.empty.Empty
+import redsort.jobs.scheduler.WorkerFiberEvents.Initialized
 
 object WorkerRpcClientFiber {
   private[this] val logger = new SourceLogger(getLogger, "scheduler")
@@ -23,16 +24,25 @@ object WorkerRpcClientFiber {
       inputQueue: Queue[IO, WorkerFiberEvents],
       schedulerFiberQueue: Queue[IO, SchedulerFiberEvents],
       ctx: WorkerRpcClient
-  ): Resource[IO, Unit] =
-    for {
-      serverAddr <- stateR.get.map(_.schedulerFiber.workers(wid).netAddr).toResource
-      _ <- logger.debug(s"RPC client fiber for $wid started").toResource
-      _ <- ctx
-        .workerRpcClient(serverAddr)
-        .flatMap(rpcClient =>
-          main(stateR, wid, inputQueue, schedulerFiberQueue, rpcClient).background
-        )
+  ): Resource[IO, Unit] = {
+    val backgroundTask = for {
+      _ <- logger.debug(s"RPC client fiber for $wid started, waiting for registration")
+
+      // wait for worker registration event
+      evt <- inputQueue.take
+
+      // start rpc client
+      _ <- evt match {
+        case Initialized(addr) =>
+          ctx
+            .workerRpcClient(addr)
+            .use(rpcClient => main(stateR, wid, inputQueue, schedulerFiberQueue, rpcClient))
+        case _ => IO.raiseError(new RuntimeException("got event other than Initialized"))
+      }
     } yield ()
+
+    backgroundTask.background.evalMap(_ => IO.unit)
+  }
 
   private def main(
       stateR: Ref[IO, SharedState],
@@ -71,6 +81,6 @@ object WorkerRpcClientFiber {
         _ <- schedulerFiberQueue.offer(new SchedulerFiberEvents.WorkerCompleted(from = wid))
       } yield ()
 
-    case _ => notImplmenetedIO
+    case _ => IO.raiseError(new RuntimeException(s"got unxpected event $event"))
   }
 }

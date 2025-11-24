@@ -20,10 +20,7 @@ class WorkerRpcClientFiberSpec extends AsyncSpec {
   def fixture =
     new {
       val sharedState = SharedState.init(
-        Map(
-          new Wid(0, 0) -> new NetAddr("1.2.3.4", 5000),
-          new Wid(0, 1) -> new NetAddr("1.2.3.4", 5001)
-        )
+        Seq(new Wid(0, 0), new Wid(0, 1))
       )
       val ctxStub = stub[WorkerRpcClient]
       val workerfs2GrpcStub = stub[WorkerFs2Grpc[IO, Metadata]]
@@ -75,20 +72,47 @@ class WorkerRpcClientFiberSpec extends AsyncSpec {
 
   val wid = new Wid(0, 0)
 
+  behavior of "worker RPC client fiber (upon receiving Initialized)"
+
+  it should "establish connection to worker RPC server" in {
+    val f = fixture
+
+    val io = for {
+      stateR <- f.sharedState
+      inputQueue <- f.inputQueue
+      schedulerFiberQueue <- f.schedulerFiberQueue
+
+      // will set this deferred value once client fiber calls ctxStub.workerRpcClient
+      deferred <- IO.deferred[Unit]
+      _ <- IO((f.ctxStub.workerRpcClient _).returnsWith({
+        deferred.complete(()).toResource.flatMap(_ => Resource.eval(IO(f.workerfs2GrpcStub)))
+      }))
+
+      _ <- WorkerRpcClientFiber
+        .start(stateR, wid, inputQueue, schedulerFiberQueue, f.ctxStub)
+        .use { _ =>
+          inputQueue.offer(WorkerFiberEvents.Initialized(new NetAddr("1.2.3.4", 5000))) >>
+            deferred.get
+        }
+    } yield ()
+    io.timeout(1.second)
+  }
+
   behavior of "worker RPC client fiber (upon receiving Job(spec))"
 
   it should "request worker to run the job" in {
     val f = fixture
     (f.workerfs2GrpcStub.runJob _).returnsWith(IO(successfulJobResult))
 
-    for {
+    val io = for {
       stateR <- f.sharedState
       inputQueue <- f.inputQueue
       schedulerFiberQueue <- f.schedulerFiberQueue
       event <- WorkerRpcClientFiber
         .start(stateR, wid, inputQueue, schedulerFiberQueue, f.ctxStub)
         .use { _ =>
-          inputQueue.offer(WorkerFiberEvents.Job(spec)) >>
+          inputQueue.offer(WorkerFiberEvents.Initialized(new NetAddr("1.2.3.4", 5000))) >>
+            inputQueue.offer(WorkerFiberEvents.Job(spec)) >>
             schedulerFiberQueue.take
         }
     } yield {
@@ -99,21 +123,22 @@ class WorkerRpcClientFiberSpec extends AsyncSpec {
         (f.workerfs2GrpcStub.runJob _).calls(0)._1
       }
     }
-
+    io.timeout(1.second)
   }
 
   it should "enqueue JobComplete event to scheduler fiber on success" in {
     val f = fixture
     (f.workerfs2GrpcStub.runJob _).returnsWith(IO(successfulJobResult))
 
-    for {
+    val io = for {
       stateR <- f.sharedState
       inputQueue <- f.inputQueue
       schedulerFiberQueue <- f.schedulerFiberQueue
       event <- WorkerRpcClientFiber
         .start(stateR, wid, inputQueue, schedulerFiberQueue, f.ctxStub)
         .use { _ =>
-          inputQueue.offer(WorkerFiberEvents.Job(spec)) >>
+          inputQueue.offer(WorkerFiberEvents.Initialized(new NetAddr("1.2.3.4", 5000))) >>
+            inputQueue.offer(WorkerFiberEvents.Job(spec)) >>
             schedulerFiberQueue.take
         }
     } yield {
@@ -122,20 +147,22 @@ class WorkerRpcClientFiberSpec extends AsyncSpec {
         wid_ should equal(wid)
       }
     }
+    io.timeout(1.second)
   }
 
   it should "enqueue JobFailed event to scheduler fiber on job error" in {
     val f = fixture
     (f.workerfs2GrpcStub.runJob _).returnsWith(IO(failingJobResult))
 
-    for {
+    val io = for {
       stateR <- f.sharedState
       inputQueue <- f.inputQueue
       schedulerFiberQueue <- f.schedulerFiberQueue
       event <- WorkerRpcClientFiber
         .start(stateR, wid, inputQueue, schedulerFiberQueue, f.ctxStub)
         .use { _ =>
-          inputQueue.offer(WorkerFiberEvents.Job(spec)) >>
+          inputQueue.offer(WorkerFiberEvents.Initialized(new NetAddr("1.2.3.4", 5000))) >>
+            inputQueue.offer(WorkerFiberEvents.Job(spec)) >>
             schedulerFiberQueue.take
         }
     } yield {
@@ -144,6 +171,7 @@ class WorkerRpcClientFiberSpec extends AsyncSpec {
         from should equal(wid)
       }
     }
+    io.timeout(1.second)
   }
 
   behavior of "worker RPC client fiber (upon receiving Complete)"
@@ -159,7 +187,8 @@ class WorkerRpcClientFiberSpec extends AsyncSpec {
       evt <- WorkerRpcClientFiber
         .start(stateR, wid, inputQueue, schedulerFiberQueue, f.ctxStub)
         .use { _ =>
-          inputQueue.offer(WorkerFiberEvents.Complete) >>
+          inputQueue.offer(WorkerFiberEvents.Initialized(new NetAddr("1.2.3.4", 5000))) >>
+            inputQueue.offer(WorkerFiberEvents.Complete) >>
             schedulerFiberQueue.take
         }
     } yield {
