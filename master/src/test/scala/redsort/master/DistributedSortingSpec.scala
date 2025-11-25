@@ -2,7 +2,7 @@ package redsort.master
 
 import redsort.master.DistributedSorting
 import cats.effect._
-import cats.syntax._
+import cats.syntax.all._
 import cats.effect.testing.scalatest.AsyncIOSpec
 import org.scalamock.stubs.CatsEffectStubs
 import org.scalatest.concurrent.AsyncTimeLimitedTests

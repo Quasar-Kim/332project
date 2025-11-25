@@ -2,7 +2,7 @@ package redsort.master
 
 import cats._
 import cats.effect._
-import cats.syntax._
+import cats.syntax.all._
 import redsort.jobs.scheduler.Scheduler
 import redsort.jobs.Common._
 import redsort.jobs.scheduler.JobSpec

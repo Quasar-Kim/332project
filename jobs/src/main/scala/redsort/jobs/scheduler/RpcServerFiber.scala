@@ -2,7 +2,7 @@ package redsort.jobs.scheduler
 
 import cats._
 import cats.effect._
-import cats.syntax._
+import cats.syntax.all._
 import io.grpc._
 import fs2.grpc.syntax.all._
 import io.grpc.netty.shaded.io.grpc.netty.NettyServerBuilder

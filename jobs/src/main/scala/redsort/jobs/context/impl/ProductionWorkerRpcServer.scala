@@ -2,7 +2,7 @@ package redsort.jobs.context.impl
 
 import redsort.jobs.context.interface.WorkerRpcServer
 import cats.effect._
-import cats.syntax._
+import cats.syntax.all._
 import fs2.grpc.syntax.all._
 import cats.effect.Resource
 import io.grpc.{Server, ServerServiceDefinition}
