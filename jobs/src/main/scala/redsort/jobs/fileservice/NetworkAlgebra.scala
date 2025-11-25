@@ -1,8 +1,8 @@
 package redsort.jobs.fileservice
 
-import cats.effect.{Async, Resource}
+import cats.effect.{IO, Resource}
 import com.google.protobuf.ByteString
-import fs2.Stream
+import fs2.{Chunk, Stream}
 import io.grpc.Metadata
 import redsort.jobs.Common.Mid
 import redsort.jobs.context.ReplicatorCtx
@@ -14,29 +14,26 @@ trait NetworkAlgebra[F[_]] {
   def readFile(ctx: ReplicatorCtx, path: String, src: Mid): F[Stream[F, Byte]]
 }
 
-class NetworkAlgebraImpl[F[_]: Async](connectionPool: ConnectionPoolAlgebra[F])
-    extends NetworkAlgebra[F] {
-  def getClient(mid: Mid): Resource[F, ReplicatorCtx] = connectionPool.borrow(mid)
+class NetworkAlgebraImpl(connectionPool: ConnectionPoolAlgebra[IO]) extends NetworkAlgebra[IO] {
+  def getClient(mid: Mid): Resource[IO, ReplicatorCtx] = connectionPool.borrow(mid)
 
-  def writeFile(ctx: ReplicatorCtx, path: String, dst: Mid, data: Stream[F, Byte]): F[Unit] = {
+  def writeFile(ctx: ReplicatorCtx, path: String, dst: Mid, data: Stream[IO, Byte]): IO[Unit] = {
     connectionPool.getRegistry.get(dst) match {
       case Some(addr) =>
         val writeRequests = data.chunks.map { chunk =>
           WriteRequest(path = path, dst = dst, data = ByteString.copyFrom(chunk.toArray))
         }
-        ctx
-          .replicatorRemoteRpcClient(addr)
-          .use { grpc =>
-            grpc.write(writeRequests, new Metadata()) // FIXME type mismatch (IO/F)
-          }()
+        ctx.replicatorRemoteRpcClient(addr).use { grpc =>
+          grpc.write(writeRequests, new Metadata()).void // void for IO[Empty] -> IO[Unit]
+        }
       case None =>
-        Async[F].raiseError(
+        IO.raiseError(
           new NoSuchElementException((s"Destination machine ID $dst not in registry"))
         )
     }
   }
 
-  def readFile(ctx: ReplicatorCtx, path: String, src: Mid): F[Stream[F, Byte]] = {
+  def readFile(ctx: ReplicatorCtx, path: String, src: Mid): IO[Stream[IO, Byte]] = {
     connectionPool.getRegistry.get(src) match {
       case Some(addr) =>
 //        val readRequest = ReadRequest(path = path, src = src)
@@ -54,15 +51,15 @@ class NetworkAlgebraImpl[F[_]: Async](connectionPool: ConnectionPoolAlgebra[F])
 //        }
 
         val readRequest = ReadRequest(path = path, src = src)
-        ctx
-          .replicatorRemoteRpcClient(addr)
-          .use { grpc =>
-            val packets: Stream[F, Packet] =
-              grpc.read(readRequest, new Metadata()) // FIXME type mismatch (IO/F)
-            packets.flatMap { packet => Stream.eval(packet.data) }
-          }()
+        ctx.replicatorRemoteRpcClient(addr).use { grpc =>
+          val packets: Stream[IO, Packet] = grpc.read(readRequest, new Metadata())
+          val bytes: Stream[IO, Byte] = packets.flatMap { packet =>
+            Stream.chunk(Chunk.array(packet.data.toByteArray))
+          }
+          IO.pure(bytes)
+        }
       case None =>
-        Async[F].raiseError(new NoSuchElementException((s"Source machine ID $src not in registry")))
+        IO.raiseError(new NoSuchElementException((s"Source machine ID $src not in registry")))
     }
   }
 }
