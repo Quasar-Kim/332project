@@ -367,40 +367,41 @@ Based on the pivot points, each worker (`<mid>_<wtid>`) gets assigned a range an
 
 ## Sorting
 
-Let *path* be a local path of a file `/input/chunk.<i>` where *i* ranges from 0 to *S*. Let *mid* be a machine ID storing the file. Create and schedule the following jobs for each input file:
+Let *path* be a local path of a file `/input/chunk.<i>` where *i* ranges from 0 to *S*. Let *mid* be a machine ID storing the file.
+Let *n* be a integer from 0 to *S*. Create and schedule the following jobs for each input file:
 
 - Input:
     - name: `<path>`
 - Output:
-    - name: `/working/sorting/chunk.<i>`
-    - replicas: `[<mid>, <any machine ID other than mid>]`
+    - name: `/working/sorted.<n>`
+    - replicas: `[<mid>]`
 - Arguments: None.
 - Return value: None.
 
 This will create a sorted chunk file on each machine.
 
-## Partitioning
+## Partitionings
 
-For each machine ID *mid*, create and schedule the following jobs for each sorted chunk file (files `/working/sorting/<mid>/chunk.<i>` with *i* in {*0*, …, *S-1*}).
+For every file `/working/sorted.<i>`, create and schedule the following jobs for each sorted chunk file (files `/working/sorted.<i>` with *i* in {*0*, …, *S-1*}).
 
 - Input:
-    - name: `/working/sorting/chunk.<i>`
+    - name: `/working/sorted.<i>`
 - Output:
-    - name: files of the form `/working/partitioning/<mid>/chunk.<_mid>_<_wtid>.<i>` where *_mid* and *_wtid* specify which range (determined during **Sampling**) the contents belong to (and `.<i>` is used to specify which sorted chunk the data came from to ensure uniqueness of the output file path)
-    - replicas: `[<mid>, <any machine ID other than mid>]`
-- Arguments: mapping of pivot points (from **Sampling**) to corresponding `<_mid>` and `<_wtid>`.
+    - name: files of the form `/working/partition.<n>.<m>` where *n* is in range `[0, number of machines)` and *m* can be any integer starting from 0.
+    - replicas: `[<mid>]`
+- Arguments: mapping of all pivot points (from **Sampling**).
 - Return value: None.
 
 This will prepare all the needed files for merging.
 
 ## Merging
 
-For every worker with *mid* and *wtid*, create and schedule the following jobs.
+For every machine with *mid*, create and schedule the following jobs.
 
 - Input:
-    - **name: all files matching the pattern  `/working/partitioning/{_mid}/chunk.<mid>_<wtid>.{chunk}` where *_mid* and *chunk* match any sequence of characters.
+    - name: all files matching the pattern `/working/partition.<i>.<mid>` where *i* is integer in range `[0, number of machines)`.
 - Output:
-    - name: `/output/partition.<n>`  where `<n>` is the index assigned to this `<mid>_<wtid>`  in **Sampling**
+    - name: multiple files named `/output/partition.<n>` where `<n>` can be any integer starting from 0 (but it must be globally unique).
     - replicas: `[<mid>]`
 - Arguments: None.
 - Return value: None.
