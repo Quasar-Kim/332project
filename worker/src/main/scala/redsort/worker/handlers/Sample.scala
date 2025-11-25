@@ -38,12 +38,8 @@ class JobSampler extends JobHandler {
     }
 
     program.timed.attempt.map {
-      case Right((duration, _)) =>
-        println(s"[Sampling] Sampling job completed in ${duration.toMillis} ms")
-        Some("OK".getBytes())
-      case Left(err) =>
-        println(s"[Sampling] Sampling job failed: ${err.getMessage}")
-        Some("FAIL".getBytes())
+      case Right((duration, _)) => Some("OK".getBytes())
+      case Left(err)            => Some("FAIL".getBytes())
     }
   }
 }

@@ -41,7 +41,7 @@ object Worker {
       handlerMap <- IO.pure(handlerMap.updated("__sync__", SyncJobHandler)).toResource
 
       // create a temporary directory and use it as a working directory
-      workingDirectory <- createWorkingDir(ctx).toResource
+      workingDirectory <- createWorkingDir(ctx, wtid).toResource
       dirs <- Directories
         .init(
           inputDirectories = inputDirectories,
@@ -80,10 +80,10 @@ object Worker {
         completed.get
     }
 
-  def createWorkingDir(ctx: FileStorage): IO[Path] = {
+  def createWorkingDir(ctx: FileStorage, wtid: Int): IO[Path] = {
     for {
       timestamp <- IO(LocalDateTime.now.format(DateTimeFormatter.ofPattern("YYYYMMdd_HHmmss")))
-      path <- IO(Path(System.getProperty("user.dir")) / s"redsort-working-$timestamp")
+      path <- IO(Path(System.getProperty("user.dir")) / s"redsort-working-$wtid-$timestamp")
       _ <- ctx.mkDir(path.toString)
     } yield path
   }

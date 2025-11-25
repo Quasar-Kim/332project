@@ -83,14 +83,15 @@ object Main extends IOApp {
 
   val handlerMap: Map[String, JobHandler] = Map(
     "sample" -> new handlers.JobSampler(),
-    "sort" -> new handlers.JobSorter()
+    "sort" -> new handlers.JobSorter(),
+    "partition" -> new handlers.JobPartitioner(),
+    "merge" -> new handlers.JobMerger()
   )
 
   def workerProgram(config: Configuration): IO[Unit] = {
     val workerIds = (0 until 4).toList
 
-    // 수정할 것 (parMapN)
-    val workersResource: Resource[IO, List[Worker]] = workerIds.traverse { id =>
+    val workersResource: Resource[IO, List[Worker]] = workerIds.parTraverse { id =>
       for {
         _ <- Resource.eval(IO.println(s"[Init] Initializing Worker $id..."))
         worker <- Worker(

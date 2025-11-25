@@ -10,6 +10,8 @@ Test / logBuffered := false
 // reprint all errors at the bottom of the test suite run.
 Test / testOptions += Tests.Argument("-oG")
 
+Global / cancelable := true
+
 // Required by artima supersafe plugin, which comes with sclatest
 ThisBuild / resolvers += "Artima Maven Repository" at "https://repo.artima.com/releases"
 

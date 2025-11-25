@@ -64,12 +64,8 @@ class JobSorter extends JobHandler {
     } yield ()
 
     program.timed.attempt.map {
-      case Right((duration, _)) =>
-        println(s"[Sorting] Job completed in ${duration.toMillis} ms")
-        Some("OK".getBytes())
-      case Left(err) =>
-        println(s"[Sorting] Job failed: ${err.getMessage}")
-        Some("FAIL".getBytes())
+      case Right((duration, _)) => Some("OK".getBytes())
+      case Left(err)            => Some("FAIL".getBytes())
     }
   }
 }
