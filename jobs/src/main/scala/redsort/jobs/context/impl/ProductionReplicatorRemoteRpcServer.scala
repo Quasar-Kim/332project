@@ -16,8 +16,7 @@ trait ProductionReplicatorRemoteRpcServer extends ReplicatorRemoteRpcServer {
     ReplicatorRemoteServiceFs2Grpc
       .bindServiceResource[IO](grpc)
       .flatMap(service =>
-        NettyServerBu
-          ilder
+        NettyServerBuilder
           .forPort(addr.port)
           .addService(service)
           .resource[IO]
