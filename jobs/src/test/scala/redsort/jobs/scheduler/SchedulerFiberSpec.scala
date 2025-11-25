@@ -563,36 +563,59 @@ class SchedulerFiberSpec extends AsyncSpec {
 
   it should "update worker file entries if all jobs are completed" in {
     val f = fixture
-    val jobResult = new JobResult(
-      success = true,
-      retval = None,
-      error = None,
-      stats = None
-    )
     val wid = new Wid(0, 0)
     val jobSpec1 = new JobSpec(
       name = "x",
       args = Seq(),
       inputs = Seq(new FileEntry(path = "@{working}/a.in", size = 1024, replicas = Seq(0))),
-      outputs = Seq(new FileEntry(path = "@{working}/a.out", size = 1024, replicas = Seq(0)))
+      outputs = Seq(new FileEntry(path = "@{working}/a.out", size = -1, replicas = Seq(0)))
     )
     val jobSpec2 = new JobSpec(
       name = "x",
       args = Seq(),
       inputs = Seq(new FileEntry(path = "@{working}/b.in", size = 1024, replicas = Seq(0))),
-      outputs = Seq(new FileEntry(path = "@{working}/b.out", size = 1024, replicas = Seq(0)))
+      outputs = Seq(new FileEntry(path = "@{working}/b.out", size = -1, replicas = Seq(0)))
     )
     val jobSpec3 = new JobSpec(
       name = "x",
       args = Seq(),
       inputs = Seq(new FileEntry(path = "@{input}/c.in", size = 1024, replicas = Seq(1))),
-      outputs = Seq(new FileEntry(path = "@{working}/c.out", size = 1024, replicas = Seq(1)))
+      outputs = Seq(new FileEntry(path = "@{working}/c.out", size = -1, replicas = Seq(1)))
     )
     val jobSpec4 = new JobSpec(
       name = "x",
       args = Seq(),
       inputs = Seq(new FileEntry(path = "@{input}/d.in", size = 1024, replicas = Seq(1))),
-      outputs = Seq(new FileEntry(path = "@{working}/d.out", size = 1024, replicas = Seq(1)))
+      outputs = Seq(new FileEntry(path = "@{working}/d.out", size = -1, replicas = Seq(1)))
+    )
+
+    val jobResultA = new JobResult(
+      success = true,
+      retval = None,
+      error = None,
+      stats = None,
+      outputs = Seq(new FileEntryMsg(path = "@{working}/a.out", size = 1024, replicas = Seq(0)))
+    )
+    val jobResultB = new JobResult(
+      success = true,
+      retval = None,
+      error = None,
+      stats = None,
+      outputs = Seq(new FileEntryMsg(path = "@{working}/b.out", size = 1024, replicas = Seq(0)))
+    )
+    val jobResultC = new JobResult(
+      success = true,
+      retval = None,
+      error = None,
+      stats = None,
+      outputs = Seq(new FileEntryMsg(path = "@{working}/c.out", size = 1024, replicas = Seq(1)))
+    )
+    val jobResultD = new JobResult(
+      success = true,
+      retval = None,
+      error = None,
+      stats = None,
+      outputs = Seq(new FileEntryMsg(path = "@{working}/d.out", size = 1024, replicas = Seq(1)))
     )
 
     f.startSchedulerFiber
@@ -610,10 +633,10 @@ class SchedulerFiberSpec extends AsyncSpec {
           // enqueue JobCompleted event
           _ <- schedulerFiberQueue.tryOfferN(
             List(
-              new SchedulerFiberEvents.JobCompleted(jobResult, new Wid(0, 0)),
-              new SchedulerFiberEvents.JobCompleted(jobResult, new Wid(0, 1)),
-              new SchedulerFiberEvents.JobCompleted(jobResult, new Wid(1, 0)),
-              new SchedulerFiberEvents.JobCompleted(jobResult, new Wid(1, 1))
+              new SchedulerFiberEvents.JobCompleted(jobResultA, new Wid(0, 0)),
+              new SchedulerFiberEvents.JobCompleted(jobResultB, new Wid(0, 1)),
+              new SchedulerFiberEvents.JobCompleted(jobResultC, new Wid(1, 0)),
+              new SchedulerFiberEvents.JobCompleted(jobResultD, new Wid(1, 1))
             )
           )
 

@@ -2,7 +2,7 @@ package redsort.jobs.worker.jobrunner
 
 import cats._
 import cats.effect._
-import cats.syntax._
+import cats.syntax.all._
 import redsort.jobs.Common._
 import redsort.jobs.messages._
 
@@ -15,6 +15,7 @@ import redsort.jobs.JobSystemException
 import com.google.protobuf.ByteString
 import redsort.jobs.Unreachable
 import redsort.jobs.SourceLogger
+import monocle.syntax.all._
 
 trait JobRunner {
   def addHandler(entry: Tuple2[String, JobHandler]): IO[JobRunner]
@@ -39,19 +40,27 @@ object JobRunner {
         runJobInner(spec).handleErrorWith {
           case WorkerErrorWrapper(err) =>
             IO.pure(new JobResult(success = false, retval = None, error = Some(err), stats = None))
-          case _ => unreachableIO
+          case err => IO.raiseError(err)
         }
 
       def runJobInner(spec: JobSpecMsg): IO[JobResult] =
         for {
+          // prepare inputs and outputs
           inputs <- prepareInputs(spec.inputs.map(FileEntry.fromMsg(_)))
           outputs <- prepareOuptputs(spec.outputs.map(FileEntry.fromMsg(_)))
+
+          // get handler for job
           handler <- getHandlerOrRaise(handlers, spec.name).adaptError { case e: Exception =>
             errorToWorkerError(WorkerErrorKind.JOB_NOT_FOUND, e)
           }
+
+          // run handler
           retval <- handler(spec.args, inputs, outputs, ctx, dirs).adaptError { case e: Exception =>
             errorToWorkerError(WorkerErrorKind.BODY_ERROR, e)
           }
+
+          // job was successful, create job result
+          outputs <- resolveFileSizes(spec.outputs, ctx)
         } yield {
           val ret = retval match {
             case Some(buf) => Some(ByteString.copyFrom(buf))
@@ -61,7 +70,8 @@ object JobRunner {
             success = true,
             retval = ret,
             error = None,
-            stats = None
+            stats = None,
+            outputs = outputs
           )
         }
 
@@ -86,6 +96,11 @@ object JobRunner {
         val workerError = new WorkerError(kind = kind, inner = Some(JobSystemException.toMsg(e)))
         new WorkerErrorWrapper(workerError)
       }
+
+      def resolveFileSizes(entries: Seq[FileEntryMsg], ctx: FileStorage): IO[Seq[FileEntryMsg]] =
+        entries.traverse { entry =>
+          ctx.fileSize(entry.path).map(size => entry.focus(_.size).replace(size))
+        }
 
       override def getHandlers: Map[String, JobHandler] = handlers
     })

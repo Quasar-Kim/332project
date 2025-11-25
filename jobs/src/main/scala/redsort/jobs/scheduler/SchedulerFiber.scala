@@ -342,21 +342,22 @@ object SchedulerFiber {
       .groupBy(_._1.mid)
       .view
       .mapValues(m =>
-        m.collect[Seq[JobSpec]] { case (wid, state) => state.completedJobs.map(_.spec).toSeq }
-          .flatten
+        m.collect[Seq[Job]] { case (wid, state) => state.completedJobs.toSeq }.flatten
       )
       .to(Map)
 
-    // collect deleted and added file entries.
-    // input files are excluded.
+    // collect deleted and added intemrediate files.
     val deletedFiles = completedJobsPerMachine.view
-      .mapValues { specs =>
-        specs.map(_.inputs.map(_.path).filter(!_.startsWith("@{input}"))).flatten.to(Seq)
+      .mapValues { jobs =>
+        jobs.map(_.spec.inputs.map(_.path).filter(_.startsWith("@{working}"))).flatten.to(Seq)
       }
       .to(Map)
     val addedFileEntries = completedJobsPerMachine.view
-      .mapValues { specs =>
-        specs.map(_.outputs.map(entry => (entry.path, entry))).flatten.to(Map)
+      .mapValues { jobs =>
+        jobs
+          .map(_.result.get.outputs.map(entryMsg => (entryMsg.path, FileEntry.fromMsg(entryMsg))))
+          .flatten
+          .to(Map)
       }
       .to(Map)
 

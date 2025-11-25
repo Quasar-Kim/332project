@@ -151,6 +151,35 @@ class SchedulerSpec extends AsyncSpec {
     outputs = Seq(new FileEntry(path = "@{working}/d.out", size = 1024, replicas = Seq(1)))
   )
 
+  val jobAresult = new JobResult(
+    success = true,
+    retval = None,
+    error = None,
+    stats = None,
+    outputs = jobA.outputs.map(FileEntry.toMsg(_))
+  )
+  val jobBresult = new JobResult(
+    success = true,
+    retval = None,
+    error = None,
+    stats = None,
+    outputs = jobB.outputs.map(FileEntry.toMsg(_))
+  )
+  val jobCresult = new JobResult(
+    success = true,
+    retval = None,
+    error = None,
+    stats = None,
+    outputs = jobC.outputs.map(FileEntry.toMsg(_))
+  )
+  val jobDresult = new JobResult(
+    success = true,
+    retval = None,
+    error = None,
+    stats = None,
+    outputs = jobD.outputs.map(FileEntry.toMsg(_))
+  )
+
   behavior of "scheduler.waitInit"
 
   it should "wait until all workers are initialized and return input files" in {
@@ -204,13 +233,15 @@ class SchedulerSpec extends AsyncSpec {
     val f = fixture
 
     // program client stub to always return successful result
-    val jobResult = new JobResult(
-      success = true,
-      retval = None,
-      error = None,
-      stats = None
-    )
-    (f.workerRpcClientStub.runJob _).returnsWith(IO.pure(jobResult))
+    (f.workerRpcClientStub.runJob _).returns { case (specMsg, _) =>
+      IO.pure {
+        val spec = JobSpec.fromMsg(specMsg)
+        if (spec == jobA) jobAresult
+        else if (spec == jobB) jobBresult
+        else if (spec == jobC) jobCresult
+        else jobDresult
+      }
+    }
 
     f.schedulerAndServer
       .use { case (scheduler, grpc) =>
@@ -269,10 +300,10 @@ class SchedulerSpec extends AsyncSpec {
 
           result.results.to(Set) should be(
             Set(
-              (jobA, jobResult),
-              (jobB, jobResult),
-              (jobC, jobResult),
-              (jobD, jobResult)
+              (jobA, jobAresult),
+              (jobB, jobBresult),
+              (jobC, jobCresult),
+              (jobD, jobDresult)
             )
           )
         }

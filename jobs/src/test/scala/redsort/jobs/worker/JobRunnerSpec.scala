@@ -16,6 +16,8 @@ import com.google.protobuf.any.{Any => ProtobufAny}
 import com.google.protobuf.ByteString
 import redsort.jobs.SourceLogger
 import org.log4s._
+import monocle.Focus
+import monocle.syntax.all._
 
 class JobRunnerSpec extends AsyncSpec {
   def fixture = new {
@@ -27,6 +29,7 @@ class JobRunnerSpec extends AsyncSpec {
     )
     val fileIO = stub[FileStorage]
     (fileIO.exists _).returnsWith(IO.pure(true))
+    (fileIO.fileSize _).returnsWith(IO.pure(1024.toLong))
 
     val handlerStub = stub[JobHandler]
     val getJobRunner = JobRunner(
@@ -142,6 +145,32 @@ class JobRunnerSpec extends AsyncSpec {
     } yield {
       result.success should be(false)
       result.error.get.kind should be(WorkerErrorKind.JOB_NOT_FOUND)
+    }
+  }
+
+  it should "set outputs field of JobResult with actual file sizes" in {
+    val f = fixture
+    (f.handlerStub.apply _).returns { case (args, inputs, outputs, ctx, dirs) =>
+      IO.pure(None)
+    }
+    val helloSpec = f.helloSpec
+      .focus(_.outputs)
+      .replace(
+        Seq(
+          new FileEntryMsg(
+            path = "@{output}/files/c",
+            size = -1,
+            replicas = Seq(0)
+          )
+        )
+      )
+
+    for {
+      runner <- f.getJobRunner
+      result <- runner.runJob(helloSpec)
+    } yield {
+      result.success should be(true)
+      result.outputs(0).size should be(1024)
     }
   }
 }
