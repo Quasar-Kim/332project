@@ -19,7 +19,7 @@ case class ConnectionPoolConfig(
 
 trait ConnectionPoolAlgebra[F[_]] {
   def borrow(mid: Mid): Resource[F, ReplicatorCtx]
-  def invalidateAll(mid: Mid): F[Unit]
+  def invalidateAllToMid(mid: Mid): F[Unit]
   def getRegistry: Map[Mid, NetAddr]
 }
 
@@ -54,9 +54,9 @@ class ConnectionPoolAlgebraImpl(
 
   private def createNewClient(mid: Mid): IO[ReplicatorCtx] = {
     registry.get(mid) match {
-      case Some(addr) => createReplicatorCtx(addr).allocated.map(_._1)
+      case Some(addr) => createReplicatorCtx(addr).use(IO.pure)
       case None       =>
-        Async[IO].raiseError(
+        IO.raiseError(
           new NoSuchElementException(
             s"Cannot find the NetAddr of machine with ID $mid -- key not in registry. Available machine IDs: ${registry.keys.mkString("; ")}"
           )
@@ -64,44 +64,44 @@ class ConnectionPoolAlgebraImpl(
     }
   }
   private def createReplicatorCtx(addr: NetAddr): Resource[IO, ReplicatorCtx] = {
-    fileStorageFactory(addr).map { fileStorage =>
-      new ReplicatorCtx {
-        override def replicatorRemoteRpcClient(
-            someAddr: NetAddr
-        ): Resource[IO, ReplicatorRemoteServiceFs2Grpc[IO, Metadata]] =
-          grpcClientFactory(someAddr)
+    for {
+      fileStorage <- fileStorageFactory(addr)
+    } yield new ReplicatorCtx {
+      override def replicatorRemoteRpcClient(
+          someAddr: NetAddr
+      ): Resource[IO, ReplicatorRemoteServiceFs2Grpc[IO, Metadata]] =
+        grpcClientFactory(someAddr)
 
-        override def read(path: String): fs2.Stream[IO, Byte] = fileStorage.read(path)
-        override def write(path: String): Pipe[IO, Byte, Unit] = fileStorage.write(path)
-        override def rename(before: String, after: String): IO[Unit] =
-          fileStorage.rename(before, after)
-        override def delete(path: String): IO[Unit] = fileStorage.delete(path)
-        override def exists(path: String): IO[Boolean] = fileStorage.exists(path)
-        override def list(path: String): IO[Map[String, Common.FileEntry]] = fileStorage.list(path)
-        override def fileSize(path: String): IO[Long] = fileStorage.fileSize(path)
-        override def mkDir(path: String): IO[String] = fileStorage.mkDir(path)
+      override def read(path: String): fs2.Stream[IO, Byte] = fileStorage.read(path)
+      override def write(path: String): Pipe[IO, Byte, Unit] = fileStorage.write(path)
+      override def rename(before: String, after: String): IO[Unit] =
+        fileStorage.rename(before, after)
+      override def delete(path: String): IO[Unit] = fileStorage.delete(path)
+      override def exists(path: String): IO[Boolean] = fileStorage.exists(path)
+      override def list(path: String): IO[Map[String, Common.FileEntry]] = fileStorage.list(path)
+      override def fileSize(path: String): IO[Long] = fileStorage.fileSize(path)
+      override def mkDir(path: String): IO[String] = fileStorage.mkDir(path)
 
-        override def replicatorRemoteRpcServer(
-            grpc: ReplicatorRemoteServiceFs2Grpc[IO, Metadata],
-            someAddr: NetAddr
-        ): Resource[IO, Server] = Resource.eval(
-          Async[IO].raiseError(
-            new UnsupportedOperationException(
-              "Trying to invoke a Remote Server method on a Client context"
-            )
+      override def replicatorRemoteRpcServer(
+          grpc: ReplicatorRemoteServiceFs2Grpc[IO, Metadata],
+          someAddr: NetAddr
+      ): Resource[IO, Server] = Resource.eval(
+        IO.raiseError(
+          new UnsupportedOperationException(
+            "Trying to invoke a Remote Server method on a Client context"
           )
         )
-        override def replicatorLocalRpcServer(
-            grpc: ReplicatorLocalServiceFs2Grpc[IO, Metadata],
-            someAddr: NetAddr
-        ): Resource[IO, Server] = Resource.eval(
-          Async[IO].raiseError(
-            new UnsupportedOperationException(
-              "Trying to invoke a Local Server method on a Client context"
-            )
+      )
+      override def replicatorLocalRpcServer(
+          grpc: ReplicatorLocalServiceFs2Grpc[IO, Metadata],
+          someAddr: NetAddr
+      ): Resource[IO, Server] = Resource.eval(
+        IO.raiseError(
+          new UnsupportedOperationException(
+            "Trying to invoke a Local Server method on a Client context"
           )
         )
-      }
+      )
     }
   }
 
@@ -109,23 +109,9 @@ class ConnectionPoolAlgebraImpl(
     pools.update { poolsMap =>
       val queue = poolsMap.getOrElse(mid, Queue.empty)
       if (queue.size < config.connectionsPerMachine) poolsMap + (mid -> queue.enqueue(ctx))
-      else {
-        closeCtx(ctx)
-        poolsMap
-      }
+      else poolsMap
     }
   }
 
-  def invalidateAll(mid: Mid): IO[Unit] = {
-    pools.modify { poolsMap =>
-      poolsMap.get(mid) match {
-        case Some(queue) =>
-          queue.foreach(ctx => closeCtx(ctx))
-          (poolsMap - mid, ())
-        case None => (poolsMap, ())
-      }
-    }
-  }
-
-  private def closeCtx(ctx: ReplicatorCtx): IO[Unit] = ???
+  def invalidateAllToMid(mid: Mid): IO[Unit] = pools.update(_ - mid)
 }
