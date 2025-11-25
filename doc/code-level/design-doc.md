@@ -666,7 +666,7 @@ new JobSpec(
 
 - Name: `partition`
 - Input: a single sorted file produced by `sorting` job.
-- Arguments: sequence of partition "end"s. For example, if cluster consists of two machines and key ranges assigned to each of them are `(0, 100]` and `(100, 200]`, then arguments are set to `Seq(100, 200)`.
+- Arguments: sequence of partition "end"s. For example, if cluster consists of two machines and key ranges assigned to each of them are `[0, 0x100)` and `[0x100, MAX_KEY + 1)`, then arguments are set to `Seq(0x100, MAX_KEY + 1)`.
 - Returns: None
 - Parallelism: multiple workers can be run in parallel on same machine.
 
@@ -675,7 +675,10 @@ Example job spec: Suppose a clsuter with two worker machines. This job partition
 ```scala
 new JobSpec(
 	name = "partition",
-	args = Seq(),
+	args = Seq(
+		new BytesArg(ByteString.fromhex("0100")),
+		new BytesArg(ByteString.fromhex("0100000000000000000000"))
+	),
 	inputs = Seq(
 		new FileEntry(path = "@{working}/sorted.0", size = 128_000_000, replicas = Seq(0))
 	),
