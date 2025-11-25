@@ -2,9 +2,13 @@ package redsort.jobs.fileservice
 
 import cats.effect._
 import cats.implicits._
+import fs2.Pipe
+import io.grpc.{Metadata, Server}
+import redsort.jobs.Common
 import redsort.jobs.Common.{Mid, NetAddr}
 import redsort.jobs.context.ReplicatorCtx
-import redsort.jobs.context.impl.ProductionReplicatorRemoteRpcClient
+import redsort.jobs.context.interface.FileStorage
+import redsort.jobs.messages.{ReplicatorLocalServiceFs2Grpc, ReplicatorRemoteServiceFs2Grpc}
 
 import scala.collection.immutable.Queue
 import scala.concurrent.duration._
@@ -22,7 +26,9 @@ trait ConnectionPoolAlgebra[F[_]] {
 
 class ConnectionPoolAlgebraImpl[F[_]: Async](
     registry: Map[Mid, NetAddr],
-    config: ConnectionPoolConfig = ConnectionPoolConfig()
+    config: ConnectionPoolConfig = ConnectionPoolConfig(),
+    grpcClientFactory: NetAddr => Resource[F, ReplicatorRemoteServiceFs2Grpc[F, Metadata]], // TODO : simplify?
+    fileStorageFactory: NetAddr => Resource[F, FileStorage] // TODO : simplify?
 ) extends ConnectionPoolAlgebra[F] {
   private val pools: Ref[F, Map[Mid, Queue[ReplicatorCtx]]] = Ref.unsafe(Map.empty)
 
@@ -34,12 +40,11 @@ class ConnectionPoolAlgebraImpl[F[_]: Async](
   private def acquireClient(mid: Mid): F[ReplicatorCtx] = {
     pools.modify { poolsMap =>
       poolsMap.get(mid) match {
-        case Some(queue) => {
+        case Some(queue) =>
           if (queue.nonEmpty) {
             val (client, rem) = queue.dequeue
             (poolsMap + (mid -> rem), Async[F].pure(client))
           } else (poolsMap, createNewClient(mid))
-        }
         case None => (poolsMap + (mid -> Queue.empty), createNewClient(mid))
       }
     }.flatten
@@ -47,17 +52,55 @@ class ConnectionPoolAlgebraImpl[F[_]: Async](
 
   private def createNewClient(mid: Mid): F[ReplicatorCtx] = {
     registry.get(mid) match {
-      case Some(addr) => createReplicatorCtx(addr)
-      case None       => {
+      case Some(addr) => createReplicatorCtx(addr).allocated.map(_._1)
+      case None =>
         Async[F].raiseError(
           new NoSuchElementException(
             s"Cannot find the NetAddr of machine with ID $mid -- key not in registry. Available machine IDs: ${registry.keys.mkString("; ")}"
           )
         )
+    }
+  }
+  private def createReplicatorCtx(addr: NetAddr): Resource[F, ReplicatorCtx] = {
+    fileStorageFactory(addr).map { fileStorage =>
+      new ReplicatorCtx {
+        override def replicatorRemoteRpcClient(
+            someAddr: NetAddr
+        ): Resource[IO, ReplicatorRemoteServiceFs2Grpc[IO, Metadata]] =
+          grpcClientFactory(someAddr) // FIXME type mismatch (IO/F)
+
+        override def read(path: String): fs2.Stream[IO, Byte] = fileStorage.read(path)
+        override def write(path: String): Pipe[IO, Byte, Unit] = fileStorage.write(path)
+        override def rename(before: String, after: String): IO[Unit] = fileStorage.rename(before, after)
+        override def delete(path: String): IO[Unit] = fileStorage.delete(path)
+        override def exists(path: String): IO[Boolean] = fileStorage.exists(path)
+        override def list(path: String): IO[Map[String, Common.FileEntry]] = fileStorage.list(path)
+        override def fileSize(path: String): IO[Long] = fileStorage.fileSize(path)
+        override def mkDir(path: String): IO[String] = fileStorage.mkDir(path)
+
+        override def replicatorRemoteRpcServer(
+            grpc: ReplicatorRemoteServiceFs2Grpc[IO, Metadata],
+            someAddr: NetAddr
+        ): Resource[IO, Server] = Resource.eval(
+          Async[F].raiseError( // FIXME IO?
+            new UnsupportedOperationException(
+              "Trying to invoke a Remote Server method on a Client context"
+            )
+          )
+        )
+        override def replicatorLocalRpcServer(
+            grpc: ReplicatorLocalServiceFs2Grpc[IO, Metadata],
+            someAddr: NetAddr
+        ): Resource[IO, Server] = Resource.eval(
+          Async[F].raiseError( // FIXME IO?
+            new UnsupportedOperationException(
+              "Trying to invoke a Local Server method on a Client context"
+            )
+          )
+        )
       }
     }
   }
-  private def createReplicatorCtx(addr: NetAddr): F[ReplicatorCtx] = ???
 
   private def releaseClient(mid: Mid, ctx: ReplicatorCtx): F[Unit] = {
     pools.update { poolsMap =>
@@ -73,10 +116,9 @@ class ConnectionPoolAlgebraImpl[F[_]: Async](
   def invalidateAll(mid: Mid): F[Unit] = {
     pools.modify { poolsMap =>
       poolsMap.get(mid) match {
-        case Some(queue) => {
+        case Some(queue) =>
           queue.foreach(ctx => closeCtx(ctx))
           (poolsMap - mid, ())
-        }
         case None => (poolsMap, ())
       }
     }
