@@ -34,15 +34,16 @@ import redsort.jobs.worker.Directories
 import redsort.jobs.messages._
 import com.google.protobuf.ByteString
 
-object SchedulerTestCtx
-    extends SchedulerCtx
-    with ProductionWorkerRpcClient
-    with ProductionSchedulerRpcServer
-
 trait FakeNetInfo extends NetInfo {
   override def getIP: IO[String] =
     IO.pure("127.0.0.1")
 }
+
+object SchedulerTestCtx
+    extends SchedulerCtx
+    with ProductionWorkerRpcClient
+    with ProductionSchedulerRpcServer
+    with FakeNetInfo
 
 class WorkerTestCtx(ref: Ref[IO, Map[String, Array[Byte]]])
     extends InMemoryFileStorage(ref)

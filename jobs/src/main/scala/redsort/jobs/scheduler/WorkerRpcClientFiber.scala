@@ -3,7 +3,7 @@ package redsort.jobs.scheduler
 import cats._
 import cats.effect._
 import cats.effect.std.Queue
-import cats.syntax._
+import cats.syntax.all._
 import redsort.jobs.Common._
 import scala.concurrent.duration._
 import redsort.jobs.messages.WorkerFs2Grpc

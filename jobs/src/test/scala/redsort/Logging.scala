@@ -19,6 +19,9 @@ object Logging {
     val appenderName = s"FILE-$name"
 
     val setup = IO {
+      // sometimes `asInstanceOf[LoggerContext]` fails if logback is not fully initialized.
+      // request logger to ensure logback is initialized.
+      val rootLogger = getLogger
       val context = LoggerFactory.getILoggerFactory().asInstanceOf[LoggerContext]
 
       // configure encoder

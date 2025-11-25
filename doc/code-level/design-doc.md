@@ -609,3 +609,109 @@ As discussed earlier, we define `AppContext` with two subtypes `Production` and 
 - `ReplicatorCtx[E]`: `Files` + `ReplicatorRemoteServer` + `ReplicatorLocalServer` + `ReplicatorRemoteClient`
 - `WorkerCtx[E]`: `Files` + `WorkerServer` + `SchedulerClient` + `ReplicatorLocalClient`
 - `SchedulerCtx[E]`: `WorkerClient` + `SchedulerServer`
+
+# Distributed Sorting
+
+## Job Handlers
+
+See `master/src/main/scala/redsort/master/DistributedSortingSpec.scala` for more details on what job specs are submitted to workers in each stages.
+
+### Sampling
+
+- Name: `sample`
+- Input: a single input file
+- Arguments: None
+- Output: None
+- Returns: up to 1MB samples extracted from head of input file
+- Parallelism: only one worker per machine runs this job.
+
+Example job spec: this job extracts sample from file `@{input}/chunk.0`.
+
+```scala
+new JobSpec(
+		name = "sample",
+		args = Seq(),
+		inputs = Seq(
+			new FileEntry(path = "@{input}/chunk.0", size = 128_000_000, replicas = Seq(0))
+		),
+		outputs = None
+)
+```
+
+### Sorting
+
+- Name: `sort`
+- Input: a single file, from inputs directory
+- Arguments: None
+- Output: a single file, saved to working directory
+- Returns: Nothing
+- Parallelism: multiple workers can be run in parallel on same machine.
+
+Example jop spec: this job sorts input file `@{input}/chunk.0` and save sorted output to `@{working}/sorted.0`.
+
+```scala
+new JobSpec(
+	name = "sort",
+	args = Seq(),
+	inputs = Seq(
+		new FileEntry(path = "@{input}/chunk.0", size = 128_000_000, replicas = Seq(0))
+	),
+	outputs = Seq(
+		new FileEntry(path = "@{working}/sorted.0", size = -1, replicas = Seq(0))
+	)
+)
+```
+
+### Partitioning
+
+- Name: `partition`
+- Input: a single sorted file produced by `sorting` job.
+- Arguments: sequence of partition "end"s. For example, if cluster consists of two machines and key ranges assigned to each of them are `[0, 0x100)` and `[0x100, MAX_KEY + 1)`, then arguments are set to `Seq(0x100, MAX_KEY + 1)`.
+- Returns: None
+- Parallelism: multiple workers can be run in parallel on same machine.
+
+Example job spec: Suppose a clsuter with two worker machines. This job partitions sorted records `@{working}/sorted.0` into two files `@{working}/partition.0.0` and `@{working}/partition.0.1`, which will be consumed (at the merging step) by machine 0 and machinie 1, respectively.  
+
+```scala
+new JobSpec(
+	name = "partition",
+	args = Seq(
+		new BytesArg(ByteString.fromhex("0100")),
+		new BytesArg(ByteString.fromhex("0100000000000000000000"))
+	),
+	inputs = Seq(
+		new FileEntry(path = "@{working}/sorted.0", size = 128_000_000, replicas = Seq(0))
+	),
+	outputs = Seq(
+		new FileEntry(path = "@{working}/partition.0.0", size = -1, replicas = Seq(0)),
+		new FileEntry(path = "@{working}/partition.0.1", size = -1, replicas = Seq(0))
+	)
+)
+```
+
+### Merging
+
+- Name: `merge`
+- Input: partition files of pattern `@{working}/partition.<i>.<mid>` where `i` is any integer and `mid` is machine ID of a worker runnign the job.
+- Arguments: None
+- OUtput: output partition files, whose size is 128MB or lower.
+- Returns: None
+- Parallelism: only one worker per machine runs this job.
+
+Example job spec: (Suppose same cluster configuration as in partitioning step) This job merges partition file `@{working}/partition.0.0` (on machine 0) and `@{working}/partition.1.0` (on machine 1) into output files `@{output}/partition.{0..2}`. `@output/partition.{0,1}` will have size of 128MB while `@output/partition.2` is smaller.
+
+```scala
+new JobSpec(
+	name = "merge",
+	args = Seq(),
+	inputs = Seq(
+		new FileEntry(path = "@{working}/partition.0.0", size = 64_000_000, replicas = Seq(0)),
+		new FileEntry(path = "@{working}/partition.1.0", size = 64_000_000, replicas = Seq(1))
+	),
+	outputs = Seq(
+		new FileEntry(path = "@{output}/partition.0", size = 128_000_000, replicas = Seq(0)),
+		new FileEntry(path = "@{output}/partition.1", size = 128_000_000, replicas = Seq(0))
+		new FileEntry(path = "@{output}/partition.2", size = 14_152_531, replicas = Seq(0))
+	)
+)
+```
