@@ -31,7 +31,9 @@ object CmdParser {
     Opts.option[Int]("port", "port number (default: 5000)", metavar = "port").withDefault(5000)
 
   val threads: Opts[Int] =
-    Opts.option[Int]("threads", "number of worker threads per machine (default: 4)", metavar = "n")
+    Opts
+      .option[Int]("threads", "number of worker threads per machine (default: 4)", metavar = "n")
+      .withDefault(4)
 
   val parser: Opts[Args] = (numMachines, port, threads).mapN(Args.apply)
 }
