@@ -66,21 +66,23 @@ object DistributedSorting {
       partitionInfo: Seq[Array[Byte]]
   ): Seq[JobSpec] = {
     files.foldLeft(Seq[JobSpec]()) { case (acc, (mid, machineFiles)) =>
-      machineFiles.foldLeft(acc) { case (specs, (_, fileEntry)) =>
-        val n = fileEntry.path.substring(fileEntry.path.lastIndexOf('.') + 1, fileEntry.path.length)
-        val newSpec = new JobSpec(
-          name = "partition",
-          args = partitionInfo.map(bytes => new BytesArg(ByteString.copyFrom(bytes))),
-          inputs = Seq(fileEntry),
-          outputs = (0 until files.size).map { i =>
-            new FileEntry(
-              path = s"@{working}/partition.$n.$i",
-              size = -1,
-              replicas = fileEntry.replicas
-            )
-          }
-        )
-        specs :+ newSpec
+      machineFiles.filter(!_._1.startsWith("@{input}")).foldLeft(acc) {
+        case (specs, (_, fileEntry)) =>
+          val n =
+            fileEntry.path.substring(fileEntry.path.lastIndexOf('.') + 1, fileEntry.path.length)
+          val newSpec = new JobSpec(
+            name = "partition",
+            args = partitionInfo.map(bytes => new BytesArg(ByteString.copyFrom(bytes))),
+            inputs = Seq(fileEntry),
+            outputs = (0 until files.size).map { i =>
+              new FileEntry(
+                path = s"@{working}/partition.$n.$i",
+                size = -1,
+                replicas = fileEntry.replicas
+              )
+            }
+          )
+          specs :+ newSpec
       }
     }
   }

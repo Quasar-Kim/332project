@@ -158,52 +158,56 @@ class DistributedSortingSpec
     val scheduler = new SchedulerStub
   }
 
+  val machineOneInputs = Map(
+    "@{input}/data1/input.0" -> new FileEntry(
+      path = "@{input}/data1/input.0",
+      size = 32 * 1024 * 1024,
+      replicas = Seq(0)
+    ),
+    "@{input}/data1/input.1" -> new FileEntry(
+      path = "@{input}/data1/input.1",
+      size = 32 * 1024 * 1024,
+      replicas = Seq(0)
+    ),
+    "@{input}/data2/input.0" -> new FileEntry(
+      path = "@{input}/data2/input.0",
+      size = 32 * 1024 * 1024,
+      replicas = Seq(0)
+    ),
+    "@{input}/data2/input.1" -> new FileEntry(
+      path = "@{input}/data2/input.1",
+      size = 32 * 1024 * 1024,
+      replicas = Seq(0)
+    )
+  )
+
+  val machineTwoInputs = Map(
+    "@{input}/data1/input.0" -> new FileEntry(
+      path = "@{input}/data1/input.0",
+      size = 32 * 1024 * 1024,
+      replicas = Seq(1)
+    ),
+    "@{input}/data1/input.1" -> new FileEntry(
+      path = "@{input}/data1/input.1",
+      size = 32 * 1024 * 1024,
+      replicas = Seq(1)
+    ),
+    "@{input}/data2/input.0" -> new FileEntry(
+      path = "@{input}/data2/input.0",
+      size = 32 * 1024 * 1024,
+      replicas = Seq(1)
+    ),
+    "@{input}/data2/input.1" -> new FileEntry(
+      path = "@{input}/data2/input.1",
+      size = 32 * 1024 * 1024,
+      replicas = Seq(1)
+    )
+  )
+
   test("sample step") {
     val files = Map(
-      0 -> Map(
-        "@{input}/data1/input.0" -> new FileEntry(
-          path = "@{input}/data1/input.0",
-          size = 32 * 1024 * 1024,
-          replicas = Seq(0)
-        ),
-        "@{input}/data1/input.1" -> new FileEntry(
-          path = "@{input}/data1/input.1",
-          size = 32 * 1024 * 1024,
-          replicas = Seq(0)
-        ),
-        "@{input}/data2/input.0" -> new FileEntry(
-          path = "@{input}/data2/input.0",
-          size = 32 * 1024 * 1024,
-          replicas = Seq(0)
-        ),
-        "@{input}/data2/input.1" -> new FileEntry(
-          path = "@{input}/data2/input.1",
-          size = 32 * 1024 * 1024,
-          replicas = Seq(0)
-        )
-      ),
-      1 -> Map(
-        "@{input}/data1/input.0" -> new FileEntry(
-          path = "@{input}/data1/input.0",
-          size = 32 * 1024 * 1024,
-          replicas = Seq(1)
-        ),
-        "@{input}/data1/input.1" -> new FileEntry(
-          path = "@{input}/data1/input.1",
-          size = 32 * 1024 * 1024,
-          replicas = Seq(1)
-        ),
-        "@{input}/data2/input.0" -> new FileEntry(
-          path = "@{input}/data2/input.0",
-          size = 32 * 1024 * 1024,
-          replicas = Seq(1)
-        ),
-        "@{input}/data2/input.1" -> new FileEntry(
-          path = "@{input}/data2/input.1",
-          size = 32 * 1024 * 1024,
-          replicas = Seq(1)
-        )
-      )
+      0 -> machineOneInputs,
+      1 -> machineTwoInputs
     )
     val specs = DistributedSorting.sampleStep(files)
 
@@ -225,50 +229,8 @@ class DistributedSortingSpec
 
   test("sort step") {
     val files = Map(
-      0 -> Map(
-        "@{input}/data1/input.0" -> new FileEntry(
-          path = "@{input}/data1/input.0",
-          size = 32 * 1024 * 1024,
-          replicas = Seq(0)
-        ),
-        "@{input}/data1/input.1" -> new FileEntry(
-          path = "@{input}/data1/input.1",
-          size = 32 * 1024 * 1024,
-          replicas = Seq(0)
-        ),
-        "@{input}/data2/input.0" -> new FileEntry(
-          path = "@{input}/data2/input.0",
-          size = 32 * 1024 * 1024,
-          replicas = Seq(0)
-        ),
-        "@{input}/data2/input.1" -> new FileEntry(
-          path = "@{input}/data2/input.1",
-          size = 32 * 1024 * 1024,
-          replicas = Seq(0)
-        )
-      ),
-      1 -> Map(
-        "@{input}/data1/input.0" -> new FileEntry(
-          path = "@{input}/data1/input.0",
-          size = 32 * 1024 * 1024,
-          replicas = Seq(1)
-        ),
-        "@{input}/data1/input.1" -> new FileEntry(
-          path = "@{input}/data1/input.1",
-          size = 32 * 1024 * 1024,
-          replicas = Seq(1)
-        ),
-        "@{input}/data2/input.0" -> new FileEntry(
-          path = "@{input}/data2/input.0",
-          size = 32 * 1024 * 1024,
-          replicas = Seq(1)
-        ),
-        "@{input}/data2/input.1" -> new FileEntry(
-          path = "@{input}/data2/input.1",
-          size = 32 * 1024 * 1024,
-          replicas = Seq(1)
-        )
-      )
+      0 -> machineOneInputs,
+      1 -> machineTwoInputs
     )
     val specs = DistributedSorting.sortStep(files)
     def jobSpec(input: FileEntry, output: FileEntry) = new JobSpec(
@@ -339,7 +301,7 @@ class DistributedSortingSpec
           size = 32 * 1024 * 1024,
           replicas = Seq(0)
         )
-      ),
+      ).concat(machineOneInputs),
       1 -> Map(
         "@{working}/sorted.4" -> new FileEntry(
           path = "@{working}/sorted.4",
@@ -361,7 +323,7 @@ class DistributedSortingSpec
           size = 32 * 1024 * 1024,
           replicas = Seq(1)
         )
-      )
+      ).concat(machineTwoInputs)
     )
     val partitionInfo = Seq(
       Array(0x80, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00).map(_.toByte),
@@ -482,7 +444,7 @@ class DistributedSortingSpec
           size = 16 * 1024 * 1024,
           replicas = Seq(0)
         )
-      ),
+      ).concat(machineOneInputs),
       1 -> Map(
         "@{working}/partition.4.0" -> new FileEntry(
           path = "@{working}/partition.4.0",
@@ -524,7 +486,7 @@ class DistributedSortingSpec
           size = 512 * 1024 * 1024, // artifically create large partition for testing
           replicas = Seq(1)
         )
-      )
+      ).concat(machineTwoInputs)
     )
     val specs = DistributedSorting.mergeStep(files)
 
