@@ -8,10 +8,67 @@ import redsort.jobs.Common._
 import redsort.jobs.scheduler.JobSpec
 import redsort.jobs.messages.BytesArg
 import com.google.protobuf.ByteString
+import redsort.jobs.scheduler.JobExecutionResult
+import org.log4s._
+import redsort.jobs.SourceLogger
 
 object DistributedSorting {
-  def run(numMachines: Int, numWorkersPerMachine: Int, scheduler: Scheduler): IO[Unit] =
-    notImplmenetedIO
+  private[this] val logger = new SourceLogger(getLogger, "master")
+
+  def run(scheduler: Scheduler): IO[Unit] =
+    for {
+      // print master IP:port
+      netAddr <- scheduler.netAddr
+      _ <- IO.println(s"${netAddr.ip}:${netAddr.port}")
+
+      // wait for all workers to be initialized
+      _ <- logger.info("waiting for workers...")
+      initialFiles <- scheduler.waitInit
+      addrs <- scheduler.machineAddrs
+      _ <- printMachineAddrs(addrs)
+
+      // stage 1: sample
+      _ <- logger.info("stage 1: sample")
+      samplingResult <- scheduler.runJobs(sampleStep(initialFiles))
+
+      // calculate partitions
+      samples <- IO.pure(getSamplesFromResults(samplingResult))
+      _ <- logger.info(
+        s"calculating partitions from ${samples.size() / 1024 / 1024} MB samples..."
+      )
+      partitions <- IO.pure(
+        Partition.findPartitions(
+          samples = samples,
+          numPartitions = scheduler.getNumMachines
+        )
+      )
+      _ <- logger.debug(s"partition calculation done: $partitions")
+
+      // stage 2: sort
+      _ <- logger.info("stage 2: sorting")
+      sortingResult <- scheduler.runJobs(sortStep(samplingResult.files))
+
+      // stage 3: partition
+      _ <- logger.info("stage 3: partitioning")
+      partitionResult <- scheduler.runJobs(partitionStep(sortingResult.files, partitions))
+
+      // stage 4: merge
+      _ <- logger.info("stage 4: merging")
+      mergeResult <- scheduler.runJobs(mergeStep(partitionResult.files))
+
+      // finalize
+      _ <- logger.info("shutting down cluster...")
+      _ <- scheduler.complete
+      _ <- logger.info("done!")
+    } yield ()
+
+  private def getSamplesFromResults(result: JobExecutionResult): ByteString =
+    result.results
+      .map(_._2.retval.get)
+      .foldLeft(ByteString.empty())((acc, buf) => acc.concat(buf))
+
+  private def printMachineAddrs(addrs: Seq[String]): IO[Unit] =
+    IO.println(addrs.mkString(", "))
 
   /** Create one job per machine that fetches first 1MB of any chunk.
     *
@@ -63,7 +120,7 @@ object DistributedSorting {
     */
   def partitionStep(
       files: Map[Mid, Map[String, FileEntry]],
-      partitionInfo: Seq[Array[Byte]]
+      partitions: Seq[ByteString]
   ): Seq[JobSpec] = {
     files.foldLeft(Seq[JobSpec]()) { case (acc, (mid, machineFiles)) =>
       machineFiles.filter(!_._1.startsWith("@{input}")).foldLeft(acc) {
@@ -72,7 +129,7 @@ object DistributedSorting {
             fileEntry.path.substring(fileEntry.path.lastIndexOf('.') + 1, fileEntry.path.length)
           val newSpec = new JobSpec(
             name = "partition",
-            args = partitionInfo.map(bytes => new BytesArg(ByteString.copyFrom(bytes))),
+            args = partitions.map(new BytesArg(_)),
             inputs = Seq(fileEntry),
             outputs = (0 until files.size).map { i =>
               new FileEntry(

@@ -45,6 +45,19 @@ trait Scheduler {
     * @return
     */
   def complete: IO[Unit]
+
+  /** Returns configured number of machines.
+    */
+  def getNumMachines: Int
+
+  /** Returns network address of scheduler RPC server.
+    */
+  def netAddr: IO[NetAddr]
+
+  /** Returns sequence of worker machine IP addresses. IMPORTANT: This method is only valid after
+    * `waitInit`ed.
+    */
+  def machineAddrs: IO[Seq[String]]
 }
 
 final case class JobExecutionResult(
@@ -173,6 +186,21 @@ object Scheduler {
           assert(evt == MainFiberEvents.CompleteDone)
           ()
         }
+
+      override def getNumMachines: Int = numMachines
+
+      override def netAddr: IO[NetAddr] =
+        ctx.getIP.map(ip => new NetAddr(ip, port))
+
+      override def machineAddrs: IO[Seq[String]] =
+        stateR.get.map(state =>
+          state.schedulerFiber.workers
+            .filter { case (wid, _) => wid.wtid == 0 }
+            .map { case (wid, workerState) => (wid, workerState.netAddr.get.ip) }
+            .toList
+            .sortBy { case (wid, _) => wid.mid }
+            .map { case (_, ip) => ip }
+        )
     }
   }
 
