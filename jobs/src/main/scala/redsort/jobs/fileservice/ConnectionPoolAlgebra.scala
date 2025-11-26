@@ -84,7 +84,7 @@ class ConnectionPoolAlgebraImpl(
 
       override def replicatorRemoteRpcServer(
           grpc: ReplicatorRemoteServiceFs2Grpc[IO, Metadata],
-          someAddr: NetAddr
+          port: Int
       ): Resource[IO, Server] = Resource.eval(
         IO.raiseError(
           new UnsupportedOperationException(
@@ -94,7 +94,7 @@ class ConnectionPoolAlgebraImpl(
       )
       override def replicatorLocalRpcServer(
           grpc: ReplicatorLocalServiceFs2Grpc[IO, Metadata],
-          someAddr: NetAddr
+          port: Int
       ): Resource[IO, Server] = Resource.eval(
         IO.raiseError(
           new UnsupportedOperationException(

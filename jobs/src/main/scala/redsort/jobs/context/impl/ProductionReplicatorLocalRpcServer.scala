@@ -11,13 +11,13 @@ import redsort.jobs.messages.ReplicatorLocalServiceFs2Grpc
 trait ProductionReplicatorLocalRpcServer extends ReplicatorLocalRpcServer {
   override def replicatorLocalRpcServer(
       grpc: ReplicatorLocalServiceFs2Grpc[IO, Metadata],
-      addr: NetAddr
+      port: Int
   ): Resource[IO, Server] =
     ReplicatorLocalServiceFs2Grpc
       .bindServiceResource[IO](grpc)
       .flatMap(service =>
         NettyServerBuilder
-          .forPort(addr.port)
+          .forPort(port)
           .addService(service)
           .resource[IO]
       )
