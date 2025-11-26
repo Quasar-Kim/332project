@@ -34,7 +34,7 @@ object DistributedSorting {
       // calculate partitions
       samples <- IO.pure(getSamplesFromResults(samplingResult))
       _ <- logger.info(
-        s"calculating partitions from ${samples.size() / 1024 / 1024} MB samples..."
+        s"calculated partitions from ${samples.size() / 1024 / 1024} MB samples..."
       )
       partitions <- IO.pure(
         Partition.findPartitions(

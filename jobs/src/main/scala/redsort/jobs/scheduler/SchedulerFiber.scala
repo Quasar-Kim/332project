@@ -238,7 +238,7 @@ object SchedulerFiber {
               if (done) {
                 for {
                   _ <- logger.info("all jobs completed")
-                  updatedState <- IO.pure(updateFileEntries(updatedState))
+                  updatedState <- updateFileEntries(updatedState)
                   _ <- mainFiberQueue.offer(
                     new MainFiberEvents.JobCompleted(
                       jobResults(updatedState.schedulerFiber.workers),
@@ -336,7 +336,7 @@ object SchedulerFiber {
       }
   }
 
-  def updateFileEntries(state: SharedState): SharedState = {
+  def updateFileEntries(state: SharedState): IO[SharedState] = {
     // for each machine, collect all completed jobs.
     val completedJobsPerMachine = state.schedulerFiber.workers
       .groupBy(_._1.mid)
@@ -370,7 +370,11 @@ object SchedulerFiber {
           (mid, entries.removedAll(deletions).concat(additions))
         }
         .to(Map)
-    state.focus(_.schedulerFiber.files).replace(files)
+
+    for {
+      _ <- logger.debug(s"new entries: $addedFileEntries")
+      _ <- logger.debug(s"deleted files: $deletedFiles")
+    } yield state.focus(_.schedulerFiber.files).replace(files)
   }
 
   def jobResults(workerStates: Map[Wid, WorkerState]): Seq[Tuple2[JobSpec, JobResult]] =
