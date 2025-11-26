@@ -90,6 +90,8 @@ class WorkerRpcClientFiberSpec extends AsyncSpec {
 
       _ <- WorkerRpcClientFiber
         .start(stateR, wid, inputQueue, schedulerFiberQueue, f.ctxStub)
+        .useForever
+        .background
         .use { _ =>
           inputQueue.offer(WorkerFiberEvents.Initialized(new NetAddr("1.2.3.4", 5000))) >>
             deferred.get
@@ -110,6 +112,8 @@ class WorkerRpcClientFiberSpec extends AsyncSpec {
       schedulerFiberQueue <- f.schedulerFiberQueue
       event <- WorkerRpcClientFiber
         .start(stateR, wid, inputQueue, schedulerFiberQueue, f.ctxStub)
+        .useForever
+        .background
         .use { _ =>
           inputQueue.offer(WorkerFiberEvents.Initialized(new NetAddr("1.2.3.4", 5000))) >>
             inputQueue.offer(WorkerFiberEvents.Job(spec)) >>
@@ -136,6 +140,8 @@ class WorkerRpcClientFiberSpec extends AsyncSpec {
       schedulerFiberQueue <- f.schedulerFiberQueue
       event <- WorkerRpcClientFiber
         .start(stateR, wid, inputQueue, schedulerFiberQueue, f.ctxStub)
+        .useForever
+        .background
         .use { _ =>
           inputQueue.offer(WorkerFiberEvents.Initialized(new NetAddr("1.2.3.4", 5000))) >>
             inputQueue.offer(WorkerFiberEvents.Job(spec)) >>
@@ -160,6 +166,8 @@ class WorkerRpcClientFiberSpec extends AsyncSpec {
       schedulerFiberQueue <- f.schedulerFiberQueue
       event <- WorkerRpcClientFiber
         .start(stateR, wid, inputQueue, schedulerFiberQueue, f.ctxStub)
+        .useForever
+        .background
         .use { _ =>
           inputQueue.offer(WorkerFiberEvents.Initialized(new NetAddr("1.2.3.4", 5000))) >>
             inputQueue.offer(WorkerFiberEvents.Job(spec)) >>
@@ -186,6 +194,8 @@ class WorkerRpcClientFiberSpec extends AsyncSpec {
       schedulerFiberQueue <- f.schedulerFiberQueue
       evt <- WorkerRpcClientFiber
         .start(stateR, wid, inputQueue, schedulerFiberQueue, f.ctxStub)
+        .useForever
+        .background
         .use { _ =>
           inputQueue.offer(WorkerFiberEvents.Initialized(new NetAddr("1.2.3.4", 5000))) >>
             inputQueue.offer(WorkerFiberEvents.Complete) >>
