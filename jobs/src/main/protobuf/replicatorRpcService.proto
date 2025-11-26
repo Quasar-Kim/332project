@@ -57,12 +57,10 @@ message ReplicationStats {
 
 message ReadRequest {
   string path = 1;
-  int32 src = 2;
 }
 
 message WriteRequest {
   string path = 1;
-  int32 dst = 2;
   bytes data = 3;
 }
 

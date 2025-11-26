@@ -21,7 +21,7 @@ class NetworkAlgebraImpl(connectionPool: ConnectionPoolAlgebra[IO]) extends Netw
     connectionPool.getRegistry.get(dst) match {
       case Some(addr) =>
         val writeRequests = data.chunks.map { chunk =>
-          WriteRequest(path = path, dst = dst, data = ByteString.copyFrom(chunk.toArray))
+          WriteRequest(path = path, data = ByteString.copyFrom(chunk.toArray))
         }
         ctx.replicatorRemoteRpcClient(addr).use { grpc =>
           grpc.write(writeRequests, new Metadata()).void // void for IO[Empty] -> IO[Unit]
@@ -50,7 +50,7 @@ class NetworkAlgebraImpl(connectionPool: ConnectionPoolAlgebra[IO]) extends Netw
 //          }
 //        }
 
-        val readRequest = ReadRequest(path = path, src = src)
+        val readRequest = ReadRequest(path = path)
         ctx.replicatorRemoteRpcClient(addr).use { grpc =>
           val packets: Stream[IO, Packet] = grpc.read(readRequest, new Metadata())
           val bytes: Stream[IO, Byte] = packets.flatMap { packet =>

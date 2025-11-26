@@ -87,7 +87,6 @@ class NetworkSpec extends AsyncSpec {
     } yield {
       f.receivedRequests should not be empty
       f.receivedRequests.foreach(_.path shouldBe f.path)
-      f.receivedRequests.foreach(_.dst shouldBe f.node1)
       new String(
         f.receivedRequests.flatMap(_.data.toByteArray).toArray
       ) shouldBe f.content
