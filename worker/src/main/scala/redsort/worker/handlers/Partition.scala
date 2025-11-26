@@ -15,7 +15,6 @@ import com.google.protobuf.any.{Any => ProtobufAny}
 
 import java.util.Arrays
 import cats.effect.std.Queue
-import redsort.worker.logger
 
 class JobPartitioner extends JobHandler {
 
