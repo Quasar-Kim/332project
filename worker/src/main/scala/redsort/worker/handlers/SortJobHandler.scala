@@ -11,7 +11,7 @@ import redsort.jobs.worker._
 
 import java.util.Arrays
 
-class JobSorter extends JobHandler {
+class SortJobHandler extends JobHandler {
 
   private val RECORD_SIZE = 100 // 100 bytes
 
@@ -25,9 +25,6 @@ class JobSorter extends JobHandler {
     }
     a.length - b.length
   }
-
-  // This handler can works with multiple input and output paths, even though
-  // the original design assumes single input and multiple outputs.
   override def apply(
       args: Seq[com.google.protobuf.any.Any],
       inputs: Seq[Path],
@@ -35,9 +32,8 @@ class JobSorter extends JobHandler {
       ctx: FileStorage,
       d: Directories
   ): IO[Option[Array[Byte]]] = {
-
     val program: IO[Unit] = for {
-
+      // Read all records into memory.
       allRecords <- Stream
         .emits(inputs)
         .flatMap(path => ctx.read(path.toString))
@@ -46,23 +42,18 @@ class JobSorter extends JobHandler {
         .compile
         .to(Array)
 
+      // Sort records.
       _ <- IO.blocking {
         Arrays.sort(allRecords, (a: Array[Byte], b: Array[Byte]) => compareBytes(a, b))
       }
 
       _ <- outputs.toList.parTraverse { path =>
-        ctx.create(path.toString).use { sink =>
-          Stream
-            .emits(allRecords)
-            .flatMap(record => Stream.chunk(Chunk.array(record)))
-            .through(sink)
-            .compile
-            .drain
-        }
+        val fileStream =
+          Stream.emits(allRecords).flatMap(record => Stream.chunk(Chunk.array(record)))
+        ctx.save(path.toString, fileStream)
       }
-
     } yield ()
 
-    program.map { _ => Some("OK".getBytes()) }
+    program.map(_ => None)
   }
 }
