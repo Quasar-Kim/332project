@@ -1,57 +1,43 @@
-// package redsort.worker.handlers
+package redsort.worker.handlers
 
-// import cats._
-// import cats.effect._
-// import cats.syntax.all._
-// import redsort.jobs.Common._
-// import redsort.jobs.messages._
+import cats._
+import cats.effect._
+import cats.syntax.all._
+import fs2.{Pipe, Stream}
+import fs2.io.file.Path
+import redsort.jobs.Common._
+import redsort.jobs.context.interface._
+import redsort.jobs.worker._
+import redsort.worker.logger
 
-// import scala.concurrent.duration._
-// import redsort.jobs.worker.filestorage.{FileStorage, AppContext}
+class JobSampler extends JobHandler {
+  override def apply(
+      args: Seq[com.google.protobuf.any.Any],
+      inputs: Seq[Path],
+      outputs: Seq[Path],
+      ctx: FileStorage,
+      d: Directories
+  ): IO[Option[Array[Byte]]] = {
+    val RECORD_SIZE = 100L
+    val NUM_RECORDS = 10000L
+    val SAMPLING_SIZE = RECORD_SIZE * NUM_RECORDS
 
-// // TODO: ASSUME:
-// // Just use the first input file for sampling
-// // The number of outputs is just one
+    val inputpath = inputs.head
 
-// class JobSampler(fileStorage: FileStorage[AppContext]) {
-//   def run(job: JobSpecMsg): IO[JobResult] = {
-//     val RECORD_SIZE = 100L // 100 bytes / record
-//     val NUM_RECORDS = 10000L
-//     val SAMPLING_SIZE = RECORD_SIZE * NUM_RECORDS // 1 MB
-//     val inputpath = job.inputs.head.path // Just use the first for sampling
-//     val outputpaths = job.outputs.map(_.path)
-//     val program: IO[Unit] = for {
-//       _ <- IO.println(s"[Sampling] Sampling job ${job.name} is started")
-//       _ <- fileStorage
-//         .read(inputpath)
-//         .take(SAMPLING_SIZE)
-//         .through(fileStorage.write(outputpaths.head))
-//         .compile
-//         .drain
-//     } yield ()
+    val writePipesResource: Resource[IO, List[Pipe[IO, Byte, Unit]]] =
+      outputs.toList.traverse { path =>
+        ctx.create(path.toString)
+      }
 
-//     program.timed.attempt
-//       .map {
-//         case Right((duration, _)) =>
-//           println(s"[Sampling] Sampling job ${job.name} completed in ${duration.toMillis} ms")
-//           JobResult(
-//             success = true,
-//             retval = None,
-//             error = None,
-//             stats = Some(JobExecutionStats(calculationTime = duration.toMillis.toInt))
-//           )
-//         case Left(err) =>
-//           JobResult(
-//             success = false,
-//             retval = None,
-//             error = Some(
-//               WorkerError(
-//                 kind = WorkerErrorKind.BODY_ERROR,
-//                 inner = Some(JobSystemError(message = s"Sampling job failed: ${err.getMessage}"))
-//               )
-//             ),
-//             stats = None
-//           )
-//       }
-//   }
-// }
+    val program: IO[Unit] = writePipesResource.use { pipes =>
+      ctx
+        .read(inputpath.toString)
+        .take(SAMPLING_SIZE)
+        .broadcastThrough(pipes: _*)
+        .compile
+        .drain
+    }
+
+    program.map { _ => Some("OK".getBytes()) }
+  }
+}

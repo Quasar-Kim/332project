@@ -18,6 +18,7 @@ import monocle.syntax.all._
 import org.log4s._
 import redsort.jobs.SourceLogger
 import scala.redsort.jobs.worker.handler.SyncJobHandler
+import java.nio.file.FileAlreadyExistsException
 
 trait Worker {
   def waitForComplete: IO[Unit]
@@ -84,7 +85,10 @@ object Worker {
     for {
       timestamp <- IO(LocalDateTime.now.format(DateTimeFormatter.ofPattern("YYYYMMdd_HHmmss")))
       path <- IO(Path(System.getProperty("user.dir")) / s"redsort-working-$timestamp")
-      _ <- ctx.mkDir(path.toString)
+      _ <- ctx.mkDir(path.toString).handleErrorWith {
+        case _: FileAlreadyExistsException => IO.unit
+        case e                             => IO.raiseError(e)
+      }
     } yield path
   }
 
