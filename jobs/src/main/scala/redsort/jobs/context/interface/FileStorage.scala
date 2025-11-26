@@ -7,6 +7,9 @@ import fs2.{Stream, Pipe, Chunk}
 import fs2.io.file.{Files, Path}
 import java.io.FileNotFoundException
 import redsort.jobs.Common.FileEntry
+import java.nio.file.StandardCopyOption
+import fs2.io.file.CopyFlags
+import fs2.io.file.CopyFlag
 
 /** Operations on file storage.
   */
@@ -57,6 +60,8 @@ trait FileStorage {
         deleteTemp
     }
   }
+
+  def save(path: String, data: Stream[IO, Byte]): IO[Unit]
 
   /** Delete file.
     *

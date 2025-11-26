@@ -92,4 +92,10 @@ class InMemoryFileStorage(ref: Ref[IO, Map[String, Array[Byte]]]) extends FileSt
         )
       } yield path
     }
+
+  override def save(path: String, data: Stream[IO, Byte]): IO[Unit] =
+    // do not make temporary file here
+    data.compile.to(Array).flatMap { bytes =>
+      ref.update(fs => fs + (path -> bytes))
+    }
 }
