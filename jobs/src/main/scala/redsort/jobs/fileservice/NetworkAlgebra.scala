@@ -21,7 +21,7 @@ class NetworkAlgebraImpl(connectionPool: ConnectionPoolAlgebra[IO]) extends Netw
     connectionPool.getRegistry.get(dst) match {
       case Some(addr) =>
         val writeRequests = data.chunks.map { chunk =>
-          WriteRequest(path = path, data = ByteString.copyFrom(chunk.toArray))
+          WriteRequest(path = Some(path), data = ByteString.copyFrom(chunk.toArray))
         }
         ctx.replicatorRemoteRpcClient(addr).use { grpc =>
           grpc.write(writeRequests, new Metadata()).void // void for IO[Empty] -> IO[Unit]
@@ -36,20 +36,6 @@ class NetworkAlgebraImpl(connectionPool: ConnectionPoolAlgebra[IO]) extends Netw
   def readFile(ctx: ReplicatorCtx, path: String, src: Mid): IO[Stream[IO, Byte]] = {
     connectionPool.getRegistry.get(src) match {
       case Some(addr) =>
-//        val readRequest = ReadRequest(path = path, src = src)
-//        ctx.replicatorRemoteRpcClient(addr).use { grpc =>
-//          grpc.read(readRequest, new Metadata())
-//        }()
-
-//        val readRequest = ReadRequest(path = path, src = src)
-//        Async[F].pure { // read returns stream of Packet
-//          Stream.resource(ctx.replicatorRemoteRpcClient(addr)).flatMap {
-//            grpc => grpc.read(readRequest, new Metadata()).flatMap {
-//              packet => Stream.chunk(Chunk.array(packet.data.toByteArray))
-//            }
-//          }
-//        }
-
         val readRequest = ReadRequest(path = path)
         ctx.replicatorRemoteRpcClient(addr).use { grpc =>
           val packets: Stream[IO, Packet] = grpc.read(readRequest, new Metadata())

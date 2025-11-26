@@ -21,28 +21,36 @@ class NetworkSpec extends AsyncSpec {
     (() => pool.getRegistry).returnsWith(Map(node1 -> addr1))
 
     // stub replicator context
-    val rpcClientStub: Stub[ReplicatorRemoteServiceFs2Grpc[IO, Metadata]] = stub[ReplicatorRemoteServiceFs2Grpc[IO, Metadata]]
+    val rpcClientStub: Stub[ReplicatorRemoteServiceFs2Grpc[IO, Metadata]] =
+      stub[ReplicatorRemoteServiceFs2Grpc[IO, Metadata]]
     val ctx: Stub[ReplicatorCtx] = stub[ReplicatorCtx]
-    stubbed(ctx.replicatorRemoteRpcClient _).returns { addr => {
-      if (addr == addr1) Resource.pure[IO, ReplicatorRemoteServiceFs2Grpc[IO, Metadata]](rpcClientStub)
-      else Resource.eval(IO.raiseError(new RuntimeException(s"unexpected address -- $addr")))
-    }}
+    stubbed(ctx.replicatorRemoteRpcClient _).returns { addr =>
+      {
+        if (addr == addr1)
+          Resource.pure[IO, ReplicatorRemoteServiceFs2Grpc[IO, Metadata]](rpcClientStub)
+        else Resource.eval(IO.raiseError(new RuntimeException(s"unexpected address -- $addr")))
+      }
+    }
 
     // borrow for pool should return the context
-    stubbed(pool.borrow _).returns { mid => {
-      if (mid == node1) Resource.pure[IO, ReplicatorCtx](ctx)
-      else Resource.eval(IO.raiseError(new RuntimeException(s"unexpected machine id -- $mid")))
-    }}
+    stubbed(pool.borrow _).returns { mid =>
+      {
+        if (mid == node1) Resource.pure[IO, ReplicatorCtx](ctx)
+        else Resource.eval(IO.raiseError(new RuntimeException(s"unexpected machine id -- $mid")))
+      }
+    }
 
     // for the files
     val content = "qwerty"
     val path = "file.txt"
     // chunks (ByteString) to make packets for read
-    val contentChunks: Stream[IO, ByteString] = Stream.emits(
-      List("q", "we", "rty").map { item =>
-        ByteString.copyFromUtf8(item)
-      }
-    ).covary[IO]
+    val contentChunks: Stream[IO, ByteString] = Stream
+      .emits(
+        List("q", "we", "rty").map { item =>
+          ByteString.copyFromUtf8(item)
+        }
+      )
+      .covary[IO]
     // stream of bytes for writeFile
     val contentBytes: Stream[IO, Byte] = Stream.emits(content.getBytes).covary[IO]
 
@@ -50,9 +58,12 @@ class NetworkSpec extends AsyncSpec {
     var receivedRequests: List[WriteRequest] = Nil
     stubbed(rpcClientStub.write _).returns { arg =>
       val stream = arg._1
-      stream.evalMap { request =>
-        IO { receivedRequests = receivedRequests :+ request }
-      }.compile.drain *> IO.pure(Empty())
+      stream
+        .evalMap { request =>
+          IO { receivedRequests = receivedRequests :+ request }
+        }
+        .compile
+        .drain *> IO.pure(Empty())
     }
 
     // read for rpc client
@@ -70,9 +81,12 @@ class NetworkSpec extends AsyncSpec {
   it should "acquire the corresponding client using the conneciton pool" in {
     val f = fixture
 
-    f.network.getClient(f.node1).use {
-      ctx => IO.pure(ctx)
-    }.unsafeRunSync() shouldBe f.ctx
+    f.network
+      .getClient(f.node1)
+      .use { ctx =>
+        IO.pure(ctx)
+      }
+      .unsafeRunSync() shouldBe f.ctx
   }
 
   behavior of "network.writeFile"
@@ -86,7 +100,7 @@ class NetworkSpec extends AsyncSpec {
       _ <- f.network.writeFile(ctx, f.path, f.node1, f.contentBytes)
     } yield {
       f.receivedRequests should not be empty
-      f.receivedRequests.foreach(_.path shouldBe f.path)
+      f.receivedRequests.foreach(_.path shouldBe Some(f.path))
       new String(
         f.receivedRequests.flatMap(_.data.toByteArray).toArray
       ) shouldBe f.content

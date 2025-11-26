@@ -60,7 +60,7 @@ message ReadRequest {
 }
 
 message WriteRequest {
-  string path = 1;
+  optional string path = 1;
   bytes data = 3;
 }
 
