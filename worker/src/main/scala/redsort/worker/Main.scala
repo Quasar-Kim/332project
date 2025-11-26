@@ -11,6 +11,11 @@ import redsort.jobs.context.impl._
 
 import redsort.worker.handlers
 
+import redsort.jobs.SourceLogger
+import org.log4s.getLogger
+
+object logger extends SourceLogger(getLogger, "workerBin")
+
 trait ProductionWorkerCtx
     extends WorkerCtx
     with ProductionFileStorage
@@ -74,7 +79,7 @@ object Main extends IOApp {
           .parseAndValidate(args)
           .leftMap(err => new IllegalArgumentException(err))
       )
-      _ <- IO.println(
+      _ <- logger.info(
         s"Starting worker with master at ${config.masterAddress}, input dirs: ${config.inputDir
             .mkString(",")}, output dir: ${config.outputDir}"
       )
@@ -93,7 +98,7 @@ object Main extends IOApp {
 
     val workersResource: Resource[IO, List[Worker]] = workerIds.parTraverse { id =>
       for {
-        _ <- Resource.eval(IO.println(s"[Init] Initializing Worker $id..."))
+        _ <- Resource.eval(logger.info(s"[Init] Initializing Worker $id..."))
         worker <- Worker(
           handlerMap = handlerMap,
           masterAddr = redsort.jobs.Common.NetAddr(config.masterIp, config.masterPort),
@@ -107,7 +112,7 @@ object Main extends IOApp {
     }
 
     workersResource.use { workers =>
-      println(s"Started ${workers.length} workers. Waiting for completion...")
+      logger.info(s"Started ${workers.length} workers. Waiting for completion...")
       workers.parTraverse { worker =>
         worker.waitForComplete
       }.void

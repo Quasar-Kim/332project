@@ -21,7 +21,7 @@ class JobMergerSpec extends AsyncFlatSpec with AsyncIOSpec with Matchers {
 
   "JobMerger" should "exactly merge 10,000 records (1MB)" in {
 
-    val recordsPerFile = 1
+    val recordsPerFile = 10000
     val input1Data = gensort.generate(recordsPerFile)
     val input2Data = gensort.generate(recordsPerFile)
     val data =

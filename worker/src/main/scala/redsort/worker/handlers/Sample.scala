@@ -8,6 +8,7 @@ import fs2.io.file.Path
 import redsort.jobs.Common._
 import redsort.jobs.context.interface._
 import redsort.jobs.worker._
+import redsort.worker.logger
 
 class JobSampler extends JobHandler {
   override def apply(
