@@ -102,7 +102,8 @@ object JobRunner {
 
       def resolveFileSizes(entries: Seq[FileEntryMsg], ctx: FileStorage): IO[Seq[FileEntryMsg]] =
         entries.traverse { entry =>
-          ctx.fileSize(entry.path).map(size => entry.focus(_.size).replace(size))
+          val path = Directories.resolvePath(dirs, Path(entry.path))
+          ctx.fileSize(path.toString).map(size => entry.focus(_.size).replace(size))
         }
 
       override def getHandlers: Map[String, JobHandler] = handlers
