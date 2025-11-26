@@ -10,6 +10,7 @@ import scala.sys.process._
 import scala.jdk.CollectionConverters._
 import java.io.IOException
 import java.io.File
+import redsort.Logging.fileLogger
 
 object DistributedSortingTestHelper {
 
@@ -29,12 +30,14 @@ object DistributedSortingTestHelper {
       numFilesPerInputDir: Int,
       recordsPerFile: Int
   )(body: String => IO[Seq[Int]]): IO[Unit] =
-    for {
-      baseDir <- IO(Paths.get("target", "test-sorting", name).toAbsolutePath)
-      _ <- IO(prepare(baseDir, numMachines, numInputDirs, numFilesPerInputDir, recordsPerFile))
-      machineOrder <- body(baseDir.toString)
-      _ <- IO(validate(baseDir, machineOrder))
-    } yield ()
+    fileLogger(name).use { logger =>
+      for {
+        baseDir <- IO(Paths.get("target", "test-sorting", name).toAbsolutePath)
+        _ <- IO(prepare(baseDir, numMachines, numInputDirs, numFilesPerInputDir, recordsPerFile))
+        machineOrder <- body(baseDir.toString)
+        _ <- IO(validate(baseDir, machineOrder))
+      } yield ()
+    }
 
   private def prepare(
       baseDir: Path,
