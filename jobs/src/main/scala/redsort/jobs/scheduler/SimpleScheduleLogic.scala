@@ -1,7 +1,7 @@
 package redsort.jobs.scheduler
 
 import cats._
-import cats.syntax._
+import cats.syntax.all._
 import cats.effect._
 import redsort.jobs.scheduler.ScheduleLogic
 import redsort.jobs.Common._

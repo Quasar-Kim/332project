@@ -5,6 +5,7 @@ object Dependencies {
     val scalamockVersion = "7.5.2"
     val monocleVersion = "3.1.0"
     val fs2Version = "3.12.0"
+    val declineVersion = "2.5.0"
     
     // Libraries
     val catsEffect = "org.typelevel" %% "cats-effect" % "3.6.3"
@@ -13,9 +14,11 @@ object Dependencies {
     val monocleCore = "dev.optics" %% "monocle-core" % monocleVersion
     val monocleMacro = "dev.optics" %% "monocle-macro" % monocleVersion
     val log4s = "org.log4s" %% "log4s" % "1.10.0"
-    val logback = "ch.qos.logback" % "logback-classic" % "1.3.5"
+    val logback = "ch.qos.logback" % "logback-classic" % "1.3.16"
     val fs2core = "co.fs2" %% "fs2-core" % fs2Version
     val fs2io = "co.fs2" %% "fs2-io" % fs2Version
+    val decline = "com.monovore" %% "decline" % declineVersion
+    val declineEffect = "com.monovore" %% "decline-effect" % declineVersion
 
     // -- testing deps
     val scalaTest = "org.scalatest" %% "scalatest" % "3.2.19" % "test"
@@ -40,5 +43,7 @@ object Dependencies {
         fs2io,
         log4s,
         logback,
+        decline,
+        declineEffect,
     )
 }

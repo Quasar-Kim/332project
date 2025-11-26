@@ -2,7 +2,7 @@ package redsort.jobs.context.impl
 
 import cats._
 import cats.effect._
-import cats.syntax._
+import cats.syntax.all._
 import fs2.{Stream, Pipe, Chunk}
 import redsort.jobs.context.interface.FileStorage
 

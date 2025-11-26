@@ -1,7 +1,7 @@
 package redsort.jobs.context.impl
 
 import cats.effect._
-import cats.syntax._
+import cats.syntax.all._
 import fs2.grpc.syntax.all._
 import redsort.jobs.messages.ReplicatorLocalServiceFs2Grpc
 import io.grpc.netty.shaded.io.grpc.netty.NettyChannelBuilder
