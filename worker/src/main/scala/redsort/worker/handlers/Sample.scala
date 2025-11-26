@@ -28,15 +28,15 @@ class JobSampler extends JobHandler {
         ctx.create(path.toString)
       }
 
-    val program: IO[Unit] = writePipesResource.use { pipes =>
-      ctx
-        .read(inputpath.toString)
-        .take(SAMPLING_SIZE)
-        .broadcastThrough(pipes: _*)
-        .compile
-        .drain
-    }
-
-    program.map { _ => Some("OK".getBytes()) }
+    writePipesResource
+      .use { pipes =>
+        ctx
+          .read(inputpath.toString)
+          .take(SAMPLING_SIZE)
+          .broadcastThrough(pipes: _*)
+          .compile
+          .drain
+      }
+      .map(_ => None)
   }
 }
