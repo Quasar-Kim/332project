@@ -14,7 +14,7 @@ object Dependencies {
     val monocleCore = "dev.optics" %% "monocle-core" % monocleVersion
     val monocleMacro = "dev.optics" %% "monocle-macro" % monocleVersion
     val log4s = "org.log4s" %% "log4s" % "1.10.0"
-    val logback = "ch.qos.logback" % "logback-classic" % "1.3.5"
+    val logback = "ch.qos.logback" % "logback-classic" % "1.3.16"
     val fs2core = "co.fs2" %% "fs2-core" % fs2Version
     val fs2io = "co.fs2" %% "fs2-io" % fs2Version
     val decline = "com.monovore" %% "decline" % declineVersion
