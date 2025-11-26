@@ -101,7 +101,7 @@ for {
 ![image.png](images/scheduler-fibers.png)
 
 - Scheduler is composed of multiple concurrent fibers, allowing system to interact with remote workers efficiently.
-    - Scheduler fiber is a core fiber that 1) schedule and manage execution of jobs received from distributed program, and also 2) keeps track of states of workers.]
+    - Scheduler fiber is a core fiber that 1. schedule and manage execution of jobs received from distributed program, and also 2. keeps track of states of workers.
     - RPC server fiber provides RPC service to workers.
     - There are one RPC client fiber per worker. They perform RPC request to corresponding worker and report result back to scheduler fiber.
 - Fibers communicate usnig a queue. Each fibers are essentially a event loop that repeats dequeuing one message and do some work accoding to the message.
@@ -185,85 +185,70 @@ struct SchedulerState {
   
 // Initializing ---> Idle ---> Running ---> Idle
 enum SchedulerStatus {
-	Idle                 // not running any jobs, initial status
+	Initializing				 // waiting for worker initialization, initial status
+	Idle                 // not running any jobs
 	Running              // running requested jobs
 }
 ```
 
-Upon start, scheduler fiber runs as follows:
+Scheduler handles each events as follows.
 
-1. Dequeue one `msg` from `evtQueue`.
-2. Check if `msg` is one of following kinds.
-    1. If `msg` is `WorkerHello(hello, from)`, then check if worker with ID `from` is already initialized.
-        1. If it is not initialized, then worker is initializing normally and its status must be DOWN. Initialize worker’s status of `sharedState` according to `hello` and set worker status to UP.
-        2. If it is already initialized, check worker’s status.
-            1. If status is DOWN, then the worker is recovering from machine fault. Initialize worker’s status of `sharedState` according to `hello`, setting worker status to UP. Then enqueue `WorkerUp` to input queue of RPC client fiber managing communcation with worker with ID `from`.
-            2. If status is UP, then the worker was restarted due to machine fault but it was not detected by other mechanisms. Go to *reschedule.*
-    2. If `msg` is `HeartbeatTimeout(from)`, then go to *handleFault.*
-    3. If `msg` is `Halt(err, from)` or `FatalError(err)`, then goto *raiseError*. (behavior of two events are same except they produce different error messages to faciliate debugging)
-    4. If `msg` is `Jobs(specs)`, check if `schedulerState.status == Idle`.
-        1. If true, then do followings
-						1. run function `schedule` to enqueue `Job`s into each worker’s pending job list.
-						2. for each worker, dequeue one `job`, change its state to `Running`, put it to running job slot of `sharedState`, and enqueue one `Job(job.spec)` message into RPC client of the worker. Finally change `schedulerState.status` to `Running`.
-        2. if false, then go to *raiseError*.
-    5. if `msg` is `JobCompleted(result, from)`, check `schedulerState.status`.
-        1. If `== Running`:
-            1. move running job of worker with ID `from` to completed job list, manipulating `sharedState`. Then, check how many jobs are left to be run.
-            2. If all jobs are completed:
-							1. send list of completed jobs to main fiber (that is running `runJobs`)
-							2. update file entries of each workers by removing intermediate files and adding output files.
-							3. change `schedulerState.status` to `Idle`. 
-            3. If there are remaining jobs, then check if pending job list of the worker is empty. If not empty, then run another job as describe in (2.4.1.3). If empty, then do nothing.
-        2. Otherwise, go to *raiseError*.
-    6. if `msg` is `WorkerNotResponding(from)`, check if `schedulerState.status == Running`.
-        1. If true, then go to *handleFault*.
-        2. If false, then go to *raiseError*.
-		7. if `msg` is `JobFailed`, go to *raiseError*.
-		8. if `msg` is `Heartbeat`:
-				1. Change status of worker to UP.
-				2. Send `WorkerUp` to RPC client of the worker.
-3. Go back to 1.
+1. `WorkerHello(hello)`:
+	1. Initialize worker’s status of `sharedState` according to `hello` and set worker status to UP.
+	2. Check if this is first initialization. If not:
+		1. Remove machine ID from all `replicas` of known intermediate files.
+		2. If there is no `runningJob`, move one job from `pendingJobs` to `runningJob`.
+		3. Enqueue `WorkerUp`, followed by `Job` (with its `spec` set to spec of `runningJob`) to input queue of RPC client of the worker.
 
-*raiseError*:
+2. `Heartbeat(from)`:
+	1. restart timer that enqueues `HeartbeatTimeout` after 3 seconds.
+	2. change status of worker to UP.
 
-1. Cancel all RPC clients and server fiber.
-2. Raise `err`.
+3. `HeartbeatTimeout(from)` or `WorkerNotResponding`:
+	1. change status of worker to DOWN.
+	2. Enqueue `WorkerDown` to RPC client of the worker.
 
-*handleFault*:
+4. `Halt` or `FatalError`:
+	1. raise recieved error.
 
-1. Change status of faulting worker to DOWN. **It is important to NOT change states other than worker status.**
-2. Go to *reschedule*.
+5. `JobCompleted(result, from)`:
+	1. move running job to completed job.
+	2. if all jobs are completed,
+		1. update file entires of each machine according to `result`. Intermediate files used as input are deleted and outputs are added.
+		2. notify main fiber that job execution was done.
+	3. otherwise, submit another job to worker.
 
-*reschedule*:
-
-1. Flush input queue of every workers, simultaneously enqueuing `WorkerDown`.
-2. Collect jobs to reschedule from pending job list of all workers and running job slot of faulting machine (if reschedule has been triggered by fault).
-3. Go to (2.4.1.1) and do subsequent steps. 
-
-NOTE: synchornization step is completely removed. They should be implemeneted as a seperate job.
+6. `JobFailed`
+	1. raise error that indicates job execution has failed.
 
 ### RPC Client Behavior
 
-1. Dequeue `msg` from input queue.
-2. If `msg` is `Job(spec)`, then race following two operations: 1) Calling RPC method RunJob(spec), and 2) dequeueing another `msg` from input queue.
-    1. If RPC method was completed first, then check if job execution was successful.
-        1. If successful, then enqueue `JobCompleted` to input queue of scheduler fiber.
-        2. If unsuccessful, then enqueue `JobFailed`.
-    2. If `msg` was received first, then it must be `WorkerDown`. Wait for another message which must be `WorkerUp`.
-    3. If it errors, then it must be raised from RPC client.
-        1. If error is due to problem in underlying connection (connection failed or aborted, and so on), enqueue `WorkerNotResponding` to input queue of scheduler fiber, then flush input queue until `WorkerUp` is received.
-3. If `msg` is `WorkerDown`, flush input queue until `WorkerUp` is received.
-4. If `msg` is `WorkerUp`, ignore.
+1. `Job(spec)`:
+	1. race following two tasks:
+		1. call RPC `RunJob()` RPC method of worker.
+		2. dequeue another `msg` from input queue and complete only if message is `WorkerDown`, ignoring all other messages.
+	2. If `RunJob()` returned faster:
+		1. if job was successful, enqueue `JobCompleted` to main fiber.
+		2. otherwise enqueue `JobFailed`.
+	3. If `WorkerDown` was received first, wait for `WorkerUp`, ignoring all other messages.
+	4. If it errors, then it must be caused by RPC method.
+		1. enqueue `WorkerNotResponding` to input queue of scheduler fiber.
+
+2. `WorkerDown`: flush input queue until `WorkerUp`.
+
+3. `WorkerUp`: ignore.
 
 ### RPC Server Behavior
 
 - method RegisterWorker:
-    1. Enqueue `WorkerHello` message to input queue of scheduler fiber.
-    2. Send back `SchedulerHello` with appropriate worker ID.
+	1. Enqueue `WorkerHello` message to input queue of scheduler fiber.
+	2. Once registration is complete, `SchedulerHello` with appropriate worker ID.
+
 - method NotifyUp:
-    - Prevent `HeartbeatTimeout` messagee to be sent to scheduler fiber.
+	1. Enqueue `Heartbeat` to scheduler fiber.
+
 - method HaltOnError:
-    - Enqueue `Halt` message to input queue of scheduler fiber.
+	1. Enqueue `Halt` message to scheduler fiber.
 
 ### `runJobs` Behavior
 
