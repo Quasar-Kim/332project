@@ -8,7 +8,6 @@ import fs2.io.file.Path
 import redsort.jobs.Common._
 import redsort.jobs.context.interface._
 import redsort.jobs.worker._
-import redsort.worker.logger
 
 class JobSampler extends JobHandler {
   override def apply(
@@ -29,15 +28,15 @@ class JobSampler extends JobHandler {
         ctx.create(path.toString)
       }
 
-    val program: IO[Unit] = writePipesResource.use { pipes =>
-      ctx
-        .read(inputpath.toString)
-        .take(SAMPLING_SIZE)
-        .broadcastThrough(pipes: _*)
-        .compile
-        .drain
-    }
-
-    program.map { _ => Some("OK".getBytes()) }
+    writePipesResource
+      .use { pipes =>
+        ctx
+          .read(inputpath.toString)
+          .take(SAMPLING_SIZE)
+          .broadcastThrough(pipes: _*)
+          .compile
+          .drain
+      }
+      .map(_ => None)
   }
 }
