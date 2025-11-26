@@ -35,7 +35,10 @@ class InMemoryFileStorage(ref: Ref[IO, Map[String, Array[Byte]]]) extends FileSt
   }
 
   override def exists(path: String): IO[Boolean] = {
-    ref.get.map(_.contains(path))
+    ref.get.map { state =>
+      state.contains(path) ||
+      state.keys.exists(k => k.startsWith(path + "/"))
+    }
   }
 
   override def rename(before: String, after: String): IO[Unit] = {

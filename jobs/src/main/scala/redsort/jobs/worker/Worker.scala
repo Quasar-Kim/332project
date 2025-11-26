@@ -18,6 +18,7 @@ import monocle.syntax.all._
 import org.log4s._
 import redsort.jobs.SourceLogger
 import scala.redsort.jobs.worker.handler.SyncJobHandler
+import java.nio.file.FileAlreadyExistsException
 
 trait Worker {
   def waitForComplete: IO[Unit]
@@ -41,7 +42,7 @@ object Worker {
       handlerMap <- IO.pure(handlerMap.updated("__sync__", SyncJobHandler)).toResource
 
       // create a temporary directory and use it as a working directory
-      workingDirectory <- createWorkingDir(ctx, wtid).toResource
+      workingDirectory <- createWorkingDir(ctx).toResource
       dirs <- Directories
         .init(
           inputDirectories = inputDirectories,
@@ -80,11 +81,14 @@ object Worker {
         completed.get
     }
 
-  def createWorkingDir(ctx: FileStorage, wtid: Int): IO[Path] = {
+  def createWorkingDir(ctx: FileStorage): IO[Path] = {
     for {
       timestamp <- IO(LocalDateTime.now.format(DateTimeFormatter.ofPattern("YYYYMMdd_HHmmss")))
-      path <- IO(Path(System.getProperty("user.dir")) / s"redsort-working-$wtid-$timestamp")
-      _ <- ctx.mkDir(path.toString)
+      path <- IO(Path(System.getProperty("user.dir")) / s"redsort-working-$timestamp")
+      _ <- ctx.mkDir(path.toString).handleErrorWith {
+        case _: FileAlreadyExistsException => IO.unit
+        case e                             => IO.raiseError(e)
+      }
     } yield path
   }
 
