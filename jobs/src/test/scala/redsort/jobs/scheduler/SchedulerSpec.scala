@@ -40,24 +40,28 @@ class SchedulerSpec extends AsyncSpec {
     (ctxStub.schedulerRpcServer _).returnsWith(Resource.eval(IO(serverStub)))
     (ctxStub.workerRpcClient _).returnsWith(Resource.eval(IO(workerRpcClientStub)))
 
-    val schedulerAndServer = for {
-      // intercept grpc server implementation using ctxStub.schedulerRpcServer
-      grpcDeferred <- Resource.eval(IO.deferred[SchedulerFs2Grpc[IO, Metadata]])
-      _ <- Resource.eval(IO((ctxStub.schedulerRpcServer _).returns { case (grpc, port) =>
-        Resource.eval(grpcDeferred.complete(grpc) >> IO(serverStub))
-      }))
+    def withSchedulerAndGrpc(
+        body: (Scheduler, SchedulerFs2Grpc[IO, Metadata]) => IO[Unit]
+    ): IO[Unit] =
+      for {
+        // intercept grpc server implementation using ctxStub.schedulerRpcServer
+        grpcDeferred <- IO.deferred[SchedulerFs2Grpc[IO, Metadata]]
+        _ <- IO((ctxStub.schedulerRpcServer _).returns { case (grpc, port) =>
+          Resource.eval(grpcDeferred.complete(grpc) >> IO(serverStub))
+        })
 
-      // start scheduler
-      scheduler <- Scheduler(
-        port = 5000,
-        numMachines = 2,
-        numWorkersPerMachine = 2,
-        ctx = ctxStub
-      )
-
-      // get intercepted server implementation
-      grpc <- Resource.eval(grpcDeferred.get)
-    } yield (scheduler, grpc)
+        _ <- Scheduler(
+          port = 5000,
+          numMachines = 2,
+          numWorkersPerMachine = 2,
+          ctx = ctxStub
+        ) { scheduler =>
+          for {
+            grpc <- grpcDeferred.get
+            _ <- body(scheduler, grpc)
+          } yield ()
+        }
+      } yield ()
 
     def initAll(grpc: SchedulerFs2Grpc[IO, Metadata]) = for {
       // registration must happen in parallel
@@ -185,46 +189,44 @@ class SchedulerSpec extends AsyncSpec {
   it should "wait until all workers are initialized and return input files" in {
     val f = fixture
 
-    f.schedulerAndServer
-      .use { case (scheduler, grpc) =>
-        for {
-          // no workers are initialized, so this should time out
-          _ <- scheduler.waitInit.timeout(100.millis).assertThrows[TimeoutException]
+    f.withSchedulerAndGrpc { case (scheduler, grpc) =>
+      for {
+        // no workers are initialized, so this should time out
+        _ <- scheduler.waitInit.timeout(100.millis).assertThrows[TimeoutException]
 
-          // init workers
-          _ <- f.initAll(grpc)
+        // init workers
+        _ <- f.initAll(grpc)
 
-          // now waitWorkers should pass
-          files <- scheduler.waitInit.timeout(100.millis)
-        } yield {
-          val machineOneFiles = Map(
-            "@{input}/a" -> new FileEntry(
-              path = "@{input}/a",
-              size = 1024,
-              replicas = Seq(0)
-            ),
-            "@{input}/b" -> new FileEntry(path = "@{input}/b", size = 1024, replicas = Seq(0))
+        // now waitInit should pass
+        files <- scheduler.waitInit
+      } yield {
+        def machineOneFiles(mid: Int) = Map(
+          "@{input}/a" -> new FileEntry(
+            path = "@{input}/a",
+            size = 1024,
+            replicas = Seq(mid)
+          ),
+          "@{input}/b" -> new FileEntry(path = "@{input}/b", size = 1024, replicas = Seq(mid))
+        )
+        def machineTwoFiles(mid: Int) = Map(
+          "@{input}/c" -> new FileEntry(
+            path = "@{input}/c",
+            size = 1024,
+            replicas = Seq(mid)
+          ),
+          "@{input}/d" -> new FileEntry(
+            path = "@{input}/d",
+            size = 1024,
+            replicas = Seq(mid)
           )
-          val machineTwoFiles = Map(
-            "@{input}/c" -> new FileEntry(
-              path = "@{input}/c",
-              size = 1024,
-              replicas = Seq(1)
-            ),
-            "@{input}/d" -> new FileEntry(
-              path = "@{input}/d",
-              size = 1024,
-              replicas = Seq(1)
-            )
-          )
+        )
 
-          files should (
-            be(Map(0 -> machineOneFiles, 1 -> machineTwoFiles))
-              or be(Map(0 -> machineTwoFiles, 1 -> machineOneFiles))
-          )
-        }
+        files should (
+          be(Map(0 -> machineOneFiles(0), 1 -> machineTwoFiles(1)))
+            or be(Map(0 -> machineTwoFiles(0), 1 -> machineOneFiles(1)))
+        )
       }
-      .timeout(1.second)
+    }.timeout(1.second)
   }
 
   behavior of "scheduler.runJobs"
@@ -243,72 +245,70 @@ class SchedulerSpec extends AsyncSpec {
       }
     }
 
-    f.schedulerAndServer
-      .use { case (scheduler, grpc) =>
-        for {
-          // init workers
-          _ <- f.initAll(grpc)
-          _ <- scheduler.waitInit.timeout(100.millis)
+    f.withSchedulerAndGrpc { case (scheduler, grpc) =>
+      for {
+        // init workers
+        _ <- f.initAll(grpc)
+        _ <- scheduler.waitInit.timeout(100.millis)
 
-          // enqueue 4 jobs, executed on each workers
-          result <- scheduler.runJobs(Seq(jobA, jobB, jobC, jobD))
-        } yield {
-          result.files should be(
-            Map(
-              0 -> Map(
-                "@{input}/a" -> new FileEntry(
-                  path = "@{input}/a",
-                  size = 1024,
-                  replicas = Seq(0)
-                ),
-                "@{input}/b" -> new FileEntry(path = "@{input}/b", size = 1024, replicas = Seq(0)),
-                "@{working}/a.out" -> new FileEntry(
-                  path = "@{working}/a.out",
-                  size = 1024,
-                  replicas = Seq(0)
-                ),
-                "@{working}/b.out" -> new FileEntry(
-                  path = "@{working}/b.out",
-                  size = 1024,
-                  replicas = Seq(0)
-                )
+        // enqueue 4 jobs, executed on each workers
+        result <- scheduler.runJobs(Seq(jobA, jobB, jobC, jobD))
+      } yield {
+        result.files should be(
+          Map(
+            0 -> Map(
+              "@{input}/a" -> new FileEntry(
+                path = "@{input}/a",
+                size = 1024,
+                replicas = Seq(0)
               ),
-              1 -> Map(
-                "@{input}/c" -> new FileEntry(
-                  path = "@{input}/c",
-                  size = 1024,
-                  replicas = Seq(1)
-                ),
-                "@{input}/d" -> new FileEntry(
-                  path = "@{input}/d",
-                  size = 1024,
-                  replicas = Seq(1)
-                ),
-                "@{working}/c.out" -> new FileEntry(
-                  path = "@{working}/c.out",
-                  size = 1024,
-                  replicas = Seq(1)
-                ),
-                "@{working}/d.out" -> new FileEntry(
-                  path = "@{working}/d.out",
-                  size = 1024,
-                  replicas = Seq(1)
-                )
+              "@{input}/b" -> new FileEntry(path = "@{input}/b", size = 1024, replicas = Seq(0)),
+              "@{working}/a.out" -> new FileEntry(
+                path = "@{working}/a.out",
+                size = 1024,
+                replicas = Seq(0)
+              ),
+              "@{working}/b.out" -> new FileEntry(
+                path = "@{working}/b.out",
+                size = 1024,
+                replicas = Seq(0)
+              )
+            ),
+            1 -> Map(
+              "@{input}/c" -> new FileEntry(
+                path = "@{input}/c",
+                size = 1024,
+                replicas = Seq(1)
+              ),
+              "@{input}/d" -> new FileEntry(
+                path = "@{input}/d",
+                size = 1024,
+                replicas = Seq(1)
+              ),
+              "@{working}/c.out" -> new FileEntry(
+                path = "@{working}/c.out",
+                size = 1024,
+                replicas = Seq(1)
+              ),
+              "@{working}/d.out" -> new FileEntry(
+                path = "@{working}/d.out",
+                size = 1024,
+                replicas = Seq(1)
               )
             )
           )
+        )
 
-          result.results.to(Set) should be(
-            Set(
-              (jobA, jobAresult),
-              (jobB, jobBresult),
-              (jobC, jobCresult),
-              (jobD, jobDresult)
-            )
+        result.results.to(Set) should be(
+          Set(
+            (jobA, jobAresult),
+            (jobB, jobBresult),
+            (jobC, jobCresult),
+            (jobD, jobDresult)
           )
-        }
+        )
       }
-      .timeout(1.second)
+    }.timeout(1.second)
   }
 
   it should "synchornize file entries of all machines after all jobs are completed" in {
@@ -323,20 +323,18 @@ class SchedulerSpec extends AsyncSpec {
     )
     (f.workerRpcClientStub.runJob _).returnsWith(IO.pure(jobResult))
 
-    f.schedulerAndServer
-      .use { case (scheduler, grpc) =>
-        for {
-          // init workers
-          _ <- f.initAll(grpc)
-          _ <- scheduler.waitInit.timeout(100.millis)
+    f.withSchedulerAndGrpc { case (scheduler, grpc) =>
+      for {
+        // init workers
+        _ <- f.initAll(grpc)
+        _ <- scheduler.waitInit.timeout(100.millis)
 
-          // enqueue 4 jobs, executed on each workers
-          result <- scheduler.runJobs(Seq(jobA, jobB, jobC, jobD))
-        } yield {
-          (f.workerRpcClientStub.runJob _).calls(5)._1.name should be(Scheduler.SYNC_JOB_NAME)
-        }
+        // enqueue 4 jobs, executed on each workers
+        result <- scheduler.runJobs(Seq(jobA, jobB, jobC, jobD))
+      } yield {
+        (f.workerRpcClientStub.runJob _).calls(5)._1.name should be(Scheduler.SYNC_JOB_NAME)
       }
-      .timeout(1.second)
+    }.timeout(1.second)
   }
 
   it should "raise error if one of jobs errors" in {
@@ -371,23 +369,21 @@ class SchedulerSpec extends AsyncSpec {
       case _ => IO.pure(goodJobResult)
     }
 
-    f.schedulerAndServer
-      .use { case (scheduler, grpc) =>
-        for {
-          // init workers
-          _ <- f.initAll(grpc)
-          _ <- scheduler.waitInit.timeout(100.millis)
+    f.withSchedulerAndGrpc { case (scheduler, grpc) =>
+      for {
+        // init workers
+        _ <- f.initAll(grpc)
+        _ <- scheduler.waitInit.timeout(100.millis)
 
-          // enqueue 4 jobs, executed on each workers
-          result <- scheduler.runJobs(Seq(jobA, jobB, jobC, jobD)).attempt
-        } yield {
-          result match {
-            case Left(error) => ()
-            case Right(_)    => fail("runJobs did not returned error")
-          }
+        // enqueue 4 jobs, executed on each workers
+        result <- scheduler.runJobs(Seq(jobA, jobB, jobC, jobD)).attempt
+      } yield {
+        result match {
+          case Left(error) => ()
+          case Right(_)    => fail("runJobs did not returned error")
         }
       }
-      .timeout(1.second)
+    }.timeout(1.second)
   }
 
   it should "raise error if one of workers request halt" in {
@@ -400,30 +396,28 @@ class SchedulerSpec extends AsyncSpec {
       )
     )
 
-    f.schedulerAndServer
-      .use { case (scheduler, grpc) =>
-        for {
-          // init workers
-          _ <- f.initAll(grpc)
-          _ <- scheduler.waitInit.timeout(100.millis)
-          result <- (
-            grpc.haltOnError(
-              new HaltRequest(
-                source = new WidMsg(0, 0),
-                err = new JobSystemError(message = "some error", cause = None, context = Map())
-              ),
-              new Metadata()
+    f.withSchedulerAndGrpc { case (scheduler, grpc) =>
+      for {
+        // init workers
+        _ <- f.initAll(grpc)
+        _ <- scheduler.waitInit.timeout(100.millis)
+        result <- (
+          grpc.haltOnError(
+            new HaltRequest(
+              source = new WidMsg(0, 0),
+              err = new JobSystemError(message = "some error", cause = None, context = Map())
             ),
-            scheduler.runJobs(Seq(jobA, jobB, jobC, jobD)).attempt
-          ).parMapN((_, result) => result)
-        } yield {
-          result match {
-            case Left(error) => error shouldBe a[JobSystemException]
-            case Right(_)    => fail("runJobs did not returned error")
-          }
+            new Metadata()
+          ),
+          scheduler.runJobs(Seq(jobA, jobB, jobC, jobD)).attempt
+        ).parMapN((_, result) => result)
+      } yield {
+        result match {
+          case Left(error) => error shouldBe a[JobSystemException]
+          case Right(_)    => fail("runJobs did not returned error")
         }
       }
-      .timeout(1.second)
+    }.timeout(1.second)
   }
 
   behavior of "scheduler.complete"
@@ -432,17 +426,15 @@ class SchedulerSpec extends AsyncSpec {
     val f = fixture
     (f.workerRpcClientStub.complete _).returnsWith(IO(new Empty))
 
-    f.schedulerAndServer
-      .use { case (scheduler, grpc) =>
-        for {
-          // init workers
-          _ <- f.initAll(grpc)
-          _ <- scheduler.waitInit
-          _ <- scheduler.complete
-        } yield {
-          (f.workerRpcClientStub.complete _).calls.length should be(4)
-        }
+    f.withSchedulerAndGrpc { case (scheduler, grpc) =>
+      for {
+        // init workers
+        _ <- f.initAll(grpc)
+        _ <- scheduler.waitInit
+        _ <- scheduler.complete
+      } yield {
+        (f.workerRpcClientStub.complete _).calls.length should be(4)
       }
-      .timeout(1.second)
+    }.timeout(1.second)
   }
 }

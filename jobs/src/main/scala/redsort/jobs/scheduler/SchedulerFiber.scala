@@ -44,7 +44,7 @@ object SchedulerFiber {
         rpcClientFiberQueues,
         rpcServerFiberQueue,
         scheduleLogic
-      ).background.evalMap(_ => IO.unit)
+      ).toResource
 
   private def main(
       stateR: Ref[IO, SharedState],

@@ -18,6 +18,7 @@ import redsort.jobs.messages.FileEntryMsg
 import redsort.jobs.JobSystemException
 import redsort.jobs.messages.WorkerErrorKind.BODY_ERROR
 import redsort.jobs.scheduler
+import scala.concurrent.duration._
 
 /** A frontend of job scheduling system.
   */
@@ -80,6 +81,8 @@ object Scheduler {
     *   Context object providing dependencies.
     * @param scheduleLogic
     *   scheduling logic used by scheduler.
+    * @param program
+    *   distributed program that uses scheduler.
     * @return
     *   a resource wrapping `Scheduler` logic that allow user to interact with scheduler system.
     */
@@ -89,119 +92,111 @@ object Scheduler {
       numWorkersPerMachine: Int,
       ctx: SchedulerCtx,
       scheduleLogic: ScheduleLogic = SimpleScheduleLogic
-  ): Resource[IO, Scheduler] = {
+  )(program: Scheduler => IO[Unit]): IO[Unit] = {
     for {
-      supervisor <- Supervisor[IO]
-
       // Initialize internal shared states.
-      wids <- workerIds(numMachines, numWorkersPerMachine).toResource
-      stateR <- SharedState.init(wids).toResource
+      wids <- workerIds(numMachines, numWorkersPerMachine)
+      stateR <- SharedState.init(wids)
 
       // Create input queues of each fibers.
-      schedulerFiberQueue <- Queue.unbounded[IO, SchedulerFiberEvents].toResource
-      mainFiberQueue <- Queue.unbounded[IO, MainFiberEvents].toResource
-      rpcClientFiberQueues <- createRpcClientFiberQueues(wids).toResource
-      rpcServerFiberQueue <- Queue.unbounded[IO, RpcServerFiberEvents].toResource
+      schedulerFiberQueue <- Queue.unbounded[IO, SchedulerFiberEvents]
+      mainFiberQueue <- Queue.unbounded[IO, MainFiberEvents]
+      rpcClientFiberQueues <- createRpcClientFiberQueues(wids)
+      rpcServerFiberQueue <- Queue.unbounded[IO, RpcServerFiberEvents]
 
-      // Launch each fibers in background
-      _ <- Resource.eval {
-        for {
-          _ <- (
-            // Launch scheduler RPC server fiber.
-            supervisor.supervise(
-              RpcServerFiber
-                .start(port, stateR, schedulerFiberQueue, ctx, rpcServerFiberQueue)
-                .useForever
-            ),
+      // Launch fibers in background
+      backgroundFibers = (
+        RpcServerFiber
+          .start(port, stateR, schedulerFiberQueue, ctx, rpcServerFiberQueue)
+          .useForever,
+        SchedulerFiber
+          .start(
+            stateR,
+            mainFiberQueue,
+            schedulerFiberQueue,
+            rpcClientFiberQueues,
+            rpcServerFiberQueue,
+            scheduleLogic
+          )
+          .useForever,
+        wids.parTraverse_ { wid =>
+          WorkerRpcClientFiber
+            .start(stateR, wid, rpcClientFiberQueues(wid), schedulerFiberQueue, ctx)
+            .useForever
+        }
+        // REMOVEME
+        // IO.raiseError(new RuntimeException("let's see how error is handled here"))
+        //   .delayBy(100.millis)
+      ).parTupled
 
-            // Launch scheduler fiber.
-            supervisor.supervise(
-              SchedulerFiber
-                .start(
-                  stateR,
-                  mainFiberQueue,
-                  schedulerFiberQueue,
-                  rpcClientFiberQueues,
-                  rpcServerFiberQueue,
-                  scheduleLogic
-                )
-                .useForever
-            ),
-
-            // Launch worker RPC service client fibers for each workers.
-            wids.parTraverse_ { wid =>
-              supervisor.supervise(
-                WorkerRpcClientFiber
-                  .start(stateR, wid, rpcClientFiberQueues(wid), schedulerFiberQueue, ctx)
-                  .useForever
-              )
-            }
-          ).parTupled.void
-        } yield ()
-      }
-    } yield new Scheduler {
-      override def waitInit: IO[Map[Int, Map[String, FileEntry]]] = for {
-        // wait for Initialized event from scheduler fiber
-        evt <- mainFiberQueue.take
-        _ <- assertIO(
-          evt.isInstanceOf[Initialized],
-          "event other than initialized is received while waiting for scheduler initialization"
-        )
-        _ <- logger.info("cluster initialized")
-      } yield evt match {
-        case Initialized(files) => files
-        case _                  =>
-          throw new Unreachable
-      }
-
-      override def runJobs(specs: Seq[JobSpec], sync: Boolean = true): IO[JobExecutionResult] =
-        for {
-          // send jobs to scheduler fiber and wait for result
-          _ <- schedulerFiberQueue.offer(new SchedulerFiberEvents.Jobs(specs))
+      // actual scheduler definition here, bound with arguments passed to apply().
+      scheduler = new Scheduler {
+        override def waitInit: IO[Map[Int, Map[String, FileEntry]]] = for {
+          // wait for Initialized event from scheduler fiber
           evt <- mainFiberQueue.take
-          result <- evt match {
-            case JobCompleted(results, files) =>
-              IO.whenA(sync)(runJobs(syncJobSpecs(files), false).void) >>
-                IO.pure(new JobExecutionResult(results, files))
-            case JobFailed(spec, result) =>
-              IO.raiseError[JobExecutionResult](
-                new RuntimeException(
-                  s"Job execution failed: kind= ${result.error.get.kind}, spec=$spec",
-                  result.error.get.inner match {
-                    case Some(inner) => JobSystemException.fromMsg(inner, source = "worker")
-                    case None        => null
-                  }
-                )
-              )
-            case SystemException(error) => IO.raiseError[JobExecutionResult](error)
-            case _                      => unreachableIO[JobExecutionResult]
-          }
-        } yield result
-
-      override def complete: IO[Unit] =
-        for {
-          _ <- schedulerFiberQueue.offer(new SchedulerFiberEvents.Complete)
-          evt <- mainFiberQueue.take
-        } yield {
-          assert(evt == MainFiberEvents.CompleteDone)
-          ()
+          _ <- assertIO(
+            evt.isInstanceOf[Initialized],
+            "event other than initialized is received while waiting for scheduler initialization"
+          )
+          _ <- logger.info("cluster initialized")
+        } yield evt match {
+          case Initialized(files) => files
+          case _                  =>
+            throw new Unreachable
         }
 
-      override def getNumMachines: Int = numMachines
+        override def runJobs(specs: Seq[JobSpec], sync: Boolean = true): IO[JobExecutionResult] =
+          for {
+            // send jobs to scheduler fiber and wait for result
+            _ <- schedulerFiberQueue.offer(new SchedulerFiberEvents.Jobs(specs))
+            evt <- mainFiberQueue.take
+            result <- evt match {
+              case JobCompleted(results, files) =>
+                IO.whenA(sync)(runJobs(syncJobSpecs(files), false).void) >>
+                  IO.pure(new JobExecutionResult(results, files))
+              case JobFailed(spec, result) =>
+                IO.raiseError[JobExecutionResult](
+                  new RuntimeException(
+                    s"Job execution failed: kind= ${result.error.get.kind}, spec=$spec",
+                    result.error.get.inner match {
+                      case Some(inner) => JobSystemException.fromMsg(inner, source = "worker")
+                      case None        => null
+                    }
+                  )
+                )
+              case SystemException(error) => IO.raiseError[JobExecutionResult](error)
+              case _                      => unreachableIO[JobExecutionResult]
+            }
+          } yield result
 
-      override def netAddr: IO[NetAddr] =
-        ctx.getIP.map(ip => new NetAddr(ip, port))
+        override def complete: IO[Unit] =
+          for {
+            _ <- schedulerFiberQueue.offer(new SchedulerFiberEvents.Complete)
+            evt <- mainFiberQueue.take
+          } yield {
+            assert(evt == MainFiberEvents.CompleteDone)
+            ()
+          }
 
-      override def machineAddrs: IO[Seq[String]] =
-        stateR.get.map(state =>
-          state.schedulerFiber.workers
-            .filter { case (wid, _) => wid.wtid == 0 }
-            .map { case (wid, workerState) => (wid, workerState.netAddr.get.ip) }
-            .toList
-            .sortBy { case (wid, _) => wid.mid }
-            .map { case (_, ip) => ip }
-        )
-    }
+        override def getNumMachines: Int = numMachines
+
+        override def netAddr: IO[NetAddr] =
+          ctx.getIP.map(ip => new NetAddr(ip, port))
+
+        override def machineAddrs: IO[Seq[String]] =
+          stateR.get.map(state =>
+            state.schedulerFiber.workers
+              .filter { case (wid, _) => wid.wtid == 0 }
+              .map { case (wid, workerState) => (wid, workerState.netAddr.get.ip) }
+              .toList
+              .sortBy { case (wid, _) => wid.mid }
+              .map { case (_, ip) => ip }
+          )
+      }
+
+      // run program with scheduler
+      _ <- backgroundFibers.race(program(scheduler))
+    } yield ()
   }
 
   /** Generate sequence of worker IDs.

@@ -91,42 +91,47 @@ class WorkerSchedulerIntegrationSpec extends AsyncFunSpec with BeforeAndAfterEac
   override val timeLimit = 10.seconds
 
   def fixture(portOffset: Int) = new {
-    def getWorker(handlerMap: Map[String, JobHandler]) = for {
-      fs <- Ref.of[IO, Map[String, Array[Byte]]](Map()).toResource
-      worker <- Worker(
-        handlerMap = handlerMap,
-        masterAddr = new NetAddr("127.0.0.1", 5000 + portOffset),
-        inputDirectories = Seq(),
-        outputDirectory = Path("/output"),
-        wtid = 0,
-        port = 6000 + portOffset,
-        ctx = new WorkerTestCtx(fs)
-      )
-    } yield worker
+    def integrationTest(
+        logName: String,
+        handlers: Map[String, JobHandler]
+    )(body: (Scheduler, Worker) => IO[Unit]): IO[Unit] =
+      fileLogger(logName)
+        .use { _ =>
+          // run scheduler
+          Scheduler(
+            port = 5000 + portOffset,
+            numMachines = 1,
+            numWorkersPerMachine = 1,
+            ctx = SchedulerTestCtx
+          ) { scheduler =>
+            // run worker in background
+            val workerRes = for {
+              workerDeferred <- IO.deferred[Worker].toResource
+              fs <- IO.ref[Map[String, Array[Byte]]](Map()).toResource
+              _ <- Worker(
+                handlerMap = handlers,
+                masterAddr = new NetAddr("127.0.0.1", 5000 + portOffset),
+                inputDirectories = Seq(),
+                outputDirectory = Path("/output"),
+                wtid = 0,
+                port = 6000 + portOffset,
+                ctx = new WorkerTestCtx(fs)
+              ).use { worker => workerDeferred.complete(worker) >> IO.never }.background
+              worker <- workerDeferred.get.toResource
+            } yield worker
 
-    val getScheduler = Scheduler(
-      port = 5000 + portOffset,
-      numMachines = 1,
-      numWorkersPerMachine = 1,
-      ctx = SchedulerTestCtx
-    )
+            workerRes.use(worker => body(scheduler, worker))
+          }
+        }
+        .timeout(5.second)
+
   }
 
   test("worker registration", NetworkTest) {
     val f = fixture(0)
 
-    fileLogger("worker-registration").use { _ =>
-      val res = for {
-        // XXX: why Resource.eval only works?
-        // spawn worker in background
-        supervisor <- Supervisor[IO]
-        _ <- Resource.eval(supervisor.supervise(f.getWorker(Map()).useForever))
-
-        // start scheduler and wait for registration
-        scheduler <- f.getScheduler
-        _ <- scheduler.waitInit.toResource
-      } yield ()
-      res.use(_ => IO.unit).timeout(5.second)
+    f.integrationTest("worker-registratiion", Map()) { case (scheduler, worker) =>
+      scheduler.waitInit.void
     }
   }
 
@@ -141,21 +146,16 @@ class WorkerSchedulerIntegrationSpec extends AsyncFunSpec with BeforeAndAfterEac
       outputs = Seq()
     )
 
-    fileLogger("noop-job-execution-no-sync").use { _ =>
-      val res = for {
-        // spawn worker in background
-        supervisor <- Supervisor[IO]
-        _ <- Resource.eval(supervisor.supervise(f.getWorker(handlers).useForever))
-        scheduler <- f.getScheduler
-        _ <- scheduler.waitInit.toResource
+    f.integrationTest("noop-job-execution-no-sync", handlers) { case (scheduler, worker) =>
+      for {
+        _ <- scheduler.waitInit
 
         // run job "noop" and get result
-        result <- scheduler.runJobs(Seq(jobSpec), sync = false).toResource
+        result <- scheduler.runJobs(Seq(jobSpec), sync = false)
       } yield {
         result.results(0)._1 should be(jobSpec)
         result.results(0)._2.success should be(true)
       }
-      res.use(_ => IO.unit).timeout(10.second)
     }
   }
 
@@ -170,21 +170,14 @@ class WorkerSchedulerIntegrationSpec extends AsyncFunSpec with BeforeAndAfterEac
       outputs = Seq()
     )
 
-    fileLogger("noop-job-execution").use { _ =>
-      val res = for {
-        // spawn worker in background
-        supervisor <- Supervisor[IO]
-        _ <- Resource.eval(supervisor.supervise(f.getWorker(handlers).useForever))
-        scheduler <- f.getScheduler
-        _ <- scheduler.waitInit.toResource
-
-        // run job "noop" and get result
-        result <- scheduler.runJobs(Seq(jobSpec)).toResource
+    f.integrationTest("noop-job-execution", handlers) { case (scheduler, worker) =>
+      for {
+        _ <- scheduler.waitInit
+        result <- scheduler.runJobs(Seq(jobSpec))
       } yield {
         result.results(0)._1 should be(jobSpec)
         result.results(0)._2.success should be(true)
       }
-      res.use(_ => IO.unit).timeout(10.second)
     }
   }
 
@@ -201,41 +194,31 @@ class WorkerSchedulerIntegrationSpec extends AsyncFunSpec with BeforeAndAfterEac
       outputs = Seq()
     )
 
-    fileLogger("job-with-arg").use { _ =>
-      val res = for {
-        // spawn worker in background
-        supervisor <- Supervisor[IO]
-        _ <- Resource.eval(supervisor.supervise(f.getWorker(handlers).useForever))
-        scheduler <- f.getScheduler
-        _ <- scheduler.waitInit.toResource
+    f.integrationTest("job-with-name", handlers) { case (scheduler, worker) =>
+      for {
+        _ <- scheduler.waitInit
 
         // run job and get result
-        result <- scheduler.runJobs(Seq(jobSpec)).toResource
+        result <- scheduler.runJobs(Seq(jobSpec))
       } yield {
         result.results(0)._1 should be(jobSpec)
         result.results(0)._2.success should be(true)
         result.results(0)._2.retval.get should be(buffer)
       }
-      res.use(_ => IO.unit).timeout(10.second)
     }
   }
 
   test("completion", NetworkTest) {
     val f = fixture(4)
 
-    fileLogger("completion").use { _ =>
-      val res = for {
-        scheduler <- f.getScheduler
-        worker <- f.getWorker(Map())
-        _ <- scheduler.waitInit.toResource
-
-        // run job and get result
+    f.integrationTest("completion", Map()) { case (scheduler, worker) =>
+      for {
+        _ <- scheduler.waitInit
         _ <- (
-          worker.waitForComplete.toResource,
-          scheduler.complete.toResource
-        ).parMapN((_, _) => ())
+          worker.waitForComplete,
+          scheduler.complete
+        ).parTupled
       } yield ()
-      res.use(_ => IO.unit).timeout(10.second)
     }
   }
 
@@ -250,23 +233,16 @@ class WorkerSchedulerIntegrationSpec extends AsyncFunSpec with BeforeAndAfterEac
       outputs = Seq()
     )
 
-    fileLogger("failing-job-execution").use { logger =>
-      val res = for {
-        // spawn worker in background
-        supervisor <- Supervisor[IO]
-        _ <- Resource.eval(supervisor.supervise(f.getWorker(handlers).useForever))
-        scheduler <- f.getScheduler
-        _ <- scheduler.waitInit.toResource
-
-        // run job "noop" and get result
-        result <- scheduler.runJobs(Seq(jobSpec)).attempt.toResource
+    f.integrationTest("failing-job-execution", handlers) { case (scheduler, worker) =>
+      for {
+        _ <- scheduler.waitInit
+        result <- scheduler.runJobs(Seq(jobSpec)).attempt
       } yield {
         result match {
-          case Left(e)  => logger.info(s"got exception: $e")
+          case Left(e)  => ()
           case Right(_) => fail("did not errored")
         }
       }
-      res.use(_ => IO.unit).timeout(10.second)
     }
   }
 }

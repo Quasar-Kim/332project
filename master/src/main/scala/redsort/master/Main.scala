@@ -57,6 +57,6 @@ object Main extends CommandIOApp(name = "master", header = "master binary") {
       numMachines = args.numMachines,
       numWorkersPerMachine = args.threads,
       ctx = Ctx
-    ).use(DistributedSorting.run)
+    )(DistributedSorting.run)
       .map(_ => ExitCode.Success)
 }

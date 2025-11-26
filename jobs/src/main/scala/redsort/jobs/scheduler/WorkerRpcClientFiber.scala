@@ -25,7 +25,7 @@ object WorkerRpcClientFiber {
       schedulerFiberQueue: Queue[IO, SchedulerFiberEvents],
       ctx: WorkerRpcClient
   ): Resource[IO, Unit] = {
-    val backgroundTask = for {
+    val io = for {
       _ <- logger.debug(s"RPC client fiber for $wid started, waiting for registration")
 
       // wait for worker registration event
@@ -41,7 +41,7 @@ object WorkerRpcClientFiber {
       }
     } yield ()
 
-    backgroundTask.background.evalMap(_ => IO.unit)
+    io.toResource
   }
 
   private def main(
