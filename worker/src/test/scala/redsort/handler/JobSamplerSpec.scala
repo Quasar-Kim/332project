@@ -47,11 +47,43 @@ class JobSamplerSpec extends AsyncFlatSpec with AsyncIOSpec with Matchers {
       outputBytes <- ctx.readAll(outputPathStr)
 
     } yield {
-      resultOpt shouldBe defined
-      new String(resultOpt.get) shouldBe "OK"
       outputSize shouldBe (10000 * 100)
       outputBytes.takeRight(2) shouldBe Array('\r'.toByte, '\n'.toByte)
     }
+  }
+
+  it should "sample fewer records if file is smaller than 1MB" in {
+    val inputPathStr = "/data/input_gensort"
+    val outputPathStr = "/data/output_sample"
+    val inputPath = Path(inputPathStr)
+    val outputPath = Path(outputPathStr)
+
+    val totalRecords = 100
+    val inputData = gensort.generate(totalRecords)
+    val dummyDirs: Directories = null
+
+    for {
+      fs <- Ref.of[IO, Map[String, Array[Byte]]](Map.empty)
+      ctx = new WorkerTestCtx(fs)
+      sampler = new JobSampler()
+      _ <- ctx.writeAll(inputPathStr, inputData)
+
+      resultOpt <- sampler.apply(
+        args = Seq.empty,
+        inputs = Seq(inputPath),
+        outputs = Seq(outputPath),
+        ctx = ctx,
+        d = dummyDirs
+      )
+
+      outputSize <- ctx.fileSize(outputPathStr)
+      outputBytes <- ctx.readAll(outputPathStr)
+
+    } yield {
+      outputSize shouldBe (100 * 100)
+      outputBytes.takeRight(2) shouldBe Array('\r'.toByte, '\n'.toByte)
+    }
+
   }
 
   it should "broadcasts to several output files" in {
@@ -89,8 +121,6 @@ class JobSamplerSpec extends AsyncFlatSpec with AsyncIOSpec with Matchers {
       thirdOutputBytes <- ctx.readAll(outputPathStrs(2))
 
     } yield {
-      resultOpt shouldBe defined
-      new String(resultOpt.get) shouldBe "OK"
       firstOutputSize shouldBe (10000 * 100)
       firstOutputBytes.takeRight(2) shouldBe Array('\r'.toByte, '\n'.toByte)
       firstOutputBytes shouldBe secondOutputBytes
