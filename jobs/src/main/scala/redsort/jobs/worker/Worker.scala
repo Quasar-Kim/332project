@@ -34,7 +34,8 @@ object Worker {
       outputDirectory: Path,
       wtid: Int,
       port: Int,
-      ctx: WorkerCtx
+      ctx: WorkerCtx,
+      workingDirectory: Option[Path] = None
   )(program: Worker => T): IO[T] =
     for {
       // initialize state
@@ -43,12 +44,15 @@ object Worker {
       completed <- IO.deferred[Unit]
 
       // create a temporary directory and use it as a working directory
-      workingDirectory <- createWorkingDir(ctx)
+      workDir <- workingDirectory match {
+        case Some(dir) => IO.pure(dir)
+        case None      => createWorkingDir(ctx)
+      }
       dirs <- Directories
         .init(
           inputDirectories = inputDirectories,
           outputDirectory = outputDirectory,
-          workingDirectory = workingDirectory
+          workingDirectory = workDir
         )
 
       // start RPC server on the background
@@ -76,6 +80,7 @@ object Worker {
             .map(_ => program(worker))
         )
 
+      _ <- logger.info(s"worker (port=$port, wtid=$wtid) started, waiting for scheduler server...")
       result <- serverFiber.race(mainFiber)
     } yield result match {
       case Left(_)      => throw new RuntimeException("server exited unexpectedly")

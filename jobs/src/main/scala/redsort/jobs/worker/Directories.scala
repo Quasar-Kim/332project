@@ -5,6 +5,8 @@ import cats.syntax.all._
 import fs2.io.file.Path
 import redsort.jobs.context.interface.FileStorage
 import java.io.FileNotFoundException
+import java.io.File
+import fs2.io.file.FileAlreadyExistsException
 
 final case class Directories(
     inputDirectories: Seq[Path],
@@ -18,18 +20,23 @@ object Directories {
       outputDirectory: Path,
       workingDirectory: Path
   ): IO[Directories] =
-    IO.pure(
-      new Directories(
-        inputDirectories = inputDirectories,
-        outputDirectory = outputDirectory,
-        workingDirectory = workingDirectory
-      )
+    for {
+      inputDirs <- inputDirectories.parTraverse(toCanonicalPath)
+      outputDir <- toCanonicalPath(outputDirectory)
+      workingDir <- toCanonicalPath(workingDirectory)
+    } yield new Directories(
+      inputDirectories = inputDirs,
+      outputDirectory = outputDir,
+      workingDirectory = workingDir
     )
+
+  def toCanonicalPath(p: Path): IO[Path] =
+    IO(Path(new File(p.toString).getCanonicalPath()))
 
   def ensureDirs(d: Directories, ctx: FileStorage): IO[Unit] =
     for {
-      _ <- ensureDir(d.workingDirectory, ctx, create = true)
       _ <- ensureDir(d.outputDirectory, ctx, create = true)
+      _ <- ensureDir(d.workingDirectory, ctx, create = true)
       _ <- d.inputDirectories.traverse(ensureDir(_, ctx, create = false))
     } yield ()
 
@@ -39,7 +46,14 @@ object Directories {
       _ <- IO.whenA(!exists && !create)(
         IO.raiseError(new FileNotFoundException(s"directory $p does not exists"))
       )
-      _ <- IO.unlessA(exists)(ctx.mkDir(p.absolute.toString).void)
+      _ <- IO.unlessA(exists)(
+        ctx
+          .mkDir(p.absolute.toString)
+          .handleErrorWith { case _: FileAlreadyExistsException =>
+            IO.unit
+          }
+          .void
+      )
     } yield ()
 
   def resolvePath(d: Directories, p: Path): Path = {
