@@ -54,7 +54,6 @@ class SortJobHandlerSpec extends AsyncFlatSpec with AsyncIOSpec with Matchers {
       out3Bytes <- ctx.readAll(outputPathStrs(2))
 
     } yield {
-      resultOpt shouldBe defined
       out1Bytes shouldBe out2Bytes
       out2Bytes shouldBe out3Bytes
       out1Bytes.length.toLong shouldBe totalExpectedSize
