@@ -1,5 +1,7 @@
 package redsort.worker
 
+import cats.data.Validated
+import com.monovore.decline._
 import cats.effect._
 import cats.syntax.all._
 import redsort.jobs.worker.Worker
@@ -13,6 +15,8 @@ import redsort.worker.handlers
 
 import redsort.jobs.SourceLogger
 import org.log4s.getLogger
+import redsort.jobs.Common.NetAddr
+import com.monovore.decline.effect.CommandIOApp
 
 object logger extends SourceLogger(getLogger, "workerBin")
 
@@ -24,67 +28,51 @@ trait ProductionWorkerCtx
     with ProductionReplicatorLocalRpcClient
     with ProductionNetInfo
 
-case class Configuration(
-    val masterAddress: String, // <masterIp>:<masterPort>
-    val inputDir: Seq[String],
-    val outputDir: String
-) {
-  lazy val masterIp: String = masterAddress.split(":")(0)
-  lazy val masterPort: Int = masterAddress.split(":")(1).toInt
+// container of command line options
+final case class Configuration(masterAddress: NetAddr, inputDirs: Seq[Path], outputDir: Path)
+object Configuration {
+  def apply(masterAddress: NetAddr, inputDirs: Seq[Path], outputDir: Path) =
+    new Configuration(masterAddress, inputDirs, outputDir)
 }
 
-// Pure utility singleton object
-case object ArgParser {
-  def parseAndValidate(args: List[String]): Either[String, Configuration] = {
-    val config = parse(args)
-    if (validate(config)) Right(config)
-    else Left("Invalid configuration: masterAddress, inputDir, and outputDir are required.")
-  }
-  def parse(args: List[String]): Configuration = {
-    def parserLoop(args: List[String], state: Int, config: Configuration): Configuration = {
-      args match {
-        case Nil =>
-          config
-        case "-I" :: tail =>
-          parserLoop(tail, 2, config)
-        case "-O" :: tail =>
-          parserLoop(tail, 3, config)
-        case head :: tail =>
-          state match {
-            case 1 => // arg: ip:port
-              parserLoop(tail, 0, config.copy(masterAddress = head))
-            case 2 => // opt: input
-              parserLoop(tail, 2, config.copy(inputDir = config.inputDir :+ head))
-            case 3 => // opt: input
-              parserLoop(tail, 0, config.copy(outputDir = head))
-            case 0 => // Ignore
-              parserLoop(tail, 0, config)
-            case _ => // Error
-              parserLoop(tail, 0, config)
+// command line parser
+object CmdParser {
+  val masterAddr: Opts[NetAddr] =
+    Opts.argument[String](metavar = "master_addr").mapValidated { s =>
+      s.split(":").toList match {
+        case ip :: portStr :: Nil =>
+          portStr.toIntOption match {
+            case Some(port) => Validated.valid(new NetAddr(ip, port))
+            case None       => Validated.invalidNel("must be formatted as <ip>:<port>")
           }
+        case _ => Validated.invalidNel("must be formatted as <ip>:<port>")
       }
     }
-    parserLoop(args, 1, new Configuration("", Seq.empty, ""))
-  }
-  def validate(config: Configuration): Boolean = {
-    config.masterAddress.nonEmpty && config.inputDir.nonEmpty && config.outputDir.nonEmpty
-  }
+
+  val inputDirHead: Opts[Path] =
+    Opts
+      .option[String]("input", help = "input directory", short = "I", metavar = "input_dir")
+      .map(Path(_))
+
+  val inputDirTail: Opts[Seq[Path]] =
+    Opts.arguments[String]("input_dir").map(_.map(Path(_)).toList.toSeq)
+
+  val inputDir = (inputDirHead, inputDirTail).mapN { case (head, tail) => Seq(head) ++ tail }
+
+  val outputDir: Opts[Path] =
+    Opts
+      .option[String]("output", help = "output directory", short = "O", metavar = "output_dir")
+      .map(Path(_))
+
+  val parser: Opts[Configuration] =
+    (masterAddr, inputDir, outputDir).mapN(Configuration.apply)
 }
 
-object Main extends IOApp {
-  override def run(args: List[String]): IO[ExitCode] =
-    for {
-      config <- IO.fromEither(
-        ArgParser
-          .parseAndValidate(args)
-          .leftMap(err => new IllegalArgumentException(err))
-      )
-      _ <- logger.info(
-        s"Starting worker with master at ${config.masterAddress}, input dirs: ${config.inputDir
-            .mkString(",")}, output dir: ${config.outputDir}"
-      )
-      _ <- workerProgram(config)
-    } yield ExitCode.Success
+object Main extends CommandIOApp(name = "worker", header = "worker binary") {
+  override def main: Opts[IO[ExitCode]] =
+    CmdParser.parser.map { case config @ Configuration(_, _, _) =>
+      workerProgram(config).map(_ => ExitCode.Success)
+    }
 
   val handlerMap: Map[String, JobHandler] = Map(
     "sample" -> new handlers.JobSampler(),
@@ -101,9 +89,9 @@ object Main extends IOApp {
         _ <- Resource.eval(logger.info(s"[Init] Initializing Worker $id..."))
         worker <- Worker(
           handlerMap = handlerMap,
-          masterAddr = redsort.jobs.Common.NetAddr(config.masterIp, config.masterPort),
-          inputDirectories = config.inputDir.map(dir => Path(dir)),
-          outputDirectory = Path(config.outputDir),
+          masterAddr = config.masterAddress,
+          inputDirectories = config.inputDirs,
+          outputDirectory = config.outputDir,
           wtid = id,
           port = 5001 + id,
           ctx = new ProductionWorkerCtx {}
