@@ -15,7 +15,7 @@ import redsort.jobs.SourceLogger
 object DistributedSorting {
   private[this] val logger = new SourceLogger(getLogger, "master")
 
-  def run(scheduler: Scheduler): IO[Unit] =
+  def run(scheduler: Scheduler): IO[Map[Wid, NetAddr]] =
     for {
       // print master IP:port
       netAddr <- scheduler.netAddr
@@ -57,10 +57,11 @@ object DistributedSorting {
       mergeResult <- scheduler.runJobs(mergeStep(partitionResult.files))
 
       // finalize
+      workerAddrs <- scheduler.workerAddrs
       _ <- logger.info("shutting down cluster...")
       _ <- scheduler.complete
       _ <- logger.info("done!")
-    } yield ()
+    } yield workerAddrs
 
   private def getSamplesFromResults(result: JobExecutionResult): ByteString =
     result.results

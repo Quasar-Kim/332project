@@ -59,6 +59,9 @@ trait Scheduler {
     * `waitInit`ed.
     */
   def machineAddrs: IO[Seq[String]]
+
+  /** Returns addresses of all workers. */
+  def workerAddrs: IO[Map[Wid, NetAddr]]
 }
 
 final case class JobExecutionResult(
@@ -86,13 +89,13 @@ object Scheduler {
     * @return
     *   a resource wrapping `Scheduler` logic that allow user to interact with scheduler system.
     */
-  def apply(
+  def apply[T](
       port: Int,
       numMachines: Int,
       numWorkersPerMachine: Int,
       ctx: SchedulerCtx,
       scheduleLogic: ScheduleLogic = SimpleScheduleLogic
-  )(program: Scheduler => IO[Unit]): IO[Unit] = {
+  )(program: Scheduler => IO[T]): IO[T] = {
     for {
       // Initialize internal shared states.
       wids <- workerIds(numMachines, numWorkersPerMachine)
@@ -192,11 +195,21 @@ object Scheduler {
               .sortBy { case (wid, _) => wid.mid }
               .map { case (_, ip) => ip }
           )
+
+        override def workerAddrs: IO[Map[Wid, NetAddr]] =
+          stateR.get.map(state =>
+            state.schedulerFiber.workers.map { case (wid, workerState) =>
+              (wid, workerState.netAddr.get)
+            }
+          )
       }
 
       // run program with scheduler
-      _ <- backgroundFibers.race(program(scheduler))
-    } yield ()
+      result <- backgroundFibers.race(program(scheduler))
+    } yield result match {
+      case Left(_)      => throw new Unreachable
+      case Right(value) => value
+    }
   }
 
   /** Generate sequence of worker IDs.

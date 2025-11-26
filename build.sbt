@@ -40,3 +40,10 @@ lazy val worker = (project in file("worker"))
     assembly / assemblyJarName := "worker.jar"
   )
   .dependsOn(jobs)
+
+lazy val root = (project in file("."))
+  .settings(commonSettings)
+  .settings(
+    Test / parallelExecution := false
+  )
+  .dependsOn(master, worker)
