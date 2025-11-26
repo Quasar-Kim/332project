@@ -55,27 +55,30 @@ class WorkerSpec extends AsyncSpec {
       workingDirectory = Path("/working")
     )
 
-    val workerAndServer = for {
-      // intercept grpc server implementation
-      grpcDeferred <- Resource.eval(IO.deferred[WorkerFs2Grpc[IO, Metadata]])
-      _ <- Resource.eval(IO((ctxStub.workerRpcServer _).returns { case (grpc, port) =>
-        Resource.eval(grpcDeferred.complete(grpc) >> IO(serverStub))
-      }))
-
-      // start worker
-      worker <- Worker(
-        handlerMap = Map(),
-        masterAddr = new NetAddr("127.0.0.1", 6000),
-        inputDirectories = Seq(Path("/sda")),
-        outputDirectory = Path("/output"),
-        wtid = 0,
-        port = 5000,
-        ctx = ctxStub
-      )
-
-      // get grpc implementation
-      grpc <- Resource.eval(grpcDeferred.get)
-    } yield (worker, grpc)
+    def withWorkerAndGrpc(
+        body: (Worker, WorkerFs2Grpc[IO, Metadata]) => IO[Unit]
+    ): IO[Unit] =
+      for {
+        // intercept grpc server implementation
+        grpcDeferred <- IO.deferred[WorkerFs2Grpc[IO, Metadata]]
+        _ <- IO((ctxStub.workerRpcServer _).returns { case (grpc, port) =>
+          Resource.eval(grpcDeferred.complete(grpc) >> IO(serverStub))
+        })
+        _ <- Worker(
+          handlerMap = Map(),
+          masterAddr = new NetAddr("127.0.0.1", 6000),
+          inputDirectories = Seq(Path("/sda")),
+          outputDirectory = Path("/output"),
+          wtid = 0,
+          port = 5000,
+          ctx = ctxStub
+        ) { worker =>
+          for {
+            grpc <- grpcDeferred.get
+            _ <- body(worker, grpc)
+          } yield ()
+        }
+      } yield ()
   }
 
   behavior of "Worker.registerWorkerToScheduler"
@@ -157,7 +160,7 @@ class WorkerSpec extends AsyncSpec {
   "Worker.waitForComplete" should "return when scheduler call Complete() RPC method" in {
     val f = fixture
 
-    f.workerAndServer.use { case (worker, grpc) =>
+    f.withWorkerAndGrpc { (worker, grpc) =>
       for {
         _ <- worker.waitForComplete.timeout(500.millis).assertThrows[TimeoutException]
         _ <- grpc.complete(new Empty, new Metadata)

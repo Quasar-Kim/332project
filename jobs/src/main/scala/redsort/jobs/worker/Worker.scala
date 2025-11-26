@@ -27,7 +27,7 @@ trait Worker {
 object Worker {
   private[this] val logger = new SourceLogger(getLogger, "worker")
 
-  def apply(
+  def apply[T](
       handlerMap: Map[String, JobHandler],
       masterAddr: NetAddr,
       inputDirectories: Seq[Path],
@@ -35,50 +35,51 @@ object Worker {
       wtid: Int,
       port: Int,
       ctx: WorkerCtx
-  ): Resource[IO, Worker] =
+  )(program: Worker => T): IO[T] =
     for {
       // initialize state
-      stateR <- SharedState.init.toResource
-      handlerMap <- IO.pure(handlerMap.updated("__sync__", SyncJobHandler)).toResource
+      stateR <- SharedState.init
+      handlerMap <- IO.pure(handlerMap.updated("__sync__", SyncJobHandler))
+      completed <- IO.deferred[Unit]
 
       // create a temporary directory and use it as a working directory
-      workingDirectory <- createWorkingDir(ctx).toResource
+      workingDirectory <- createWorkingDir(ctx)
       dirs <- Directories
         .init(
           inputDirectories = inputDirectories,
           outputDirectory = outputDirectory,
           workingDirectory = workingDirectory
         )
-        .toResource
 
       // start RPC server on the background
-      supervisor <- Supervisor[IO]
-      completed <- IO.deferred[Unit].toResource
-      _ <- Resource.eval {
-        supervisor.supervise(
-          WorkerServerFiber
-            .start(
-              stateR = stateR,
-              port = port,
-              handlers = handlerMap,
-              dirs = dirs,
-              ctx = ctx,
-              logger = logger,
-              completed = completed
-            )
-            .useForever
+      serverFiber = WorkerServerFiber
+        .start(
+          stateR = stateR,
+          port = port,
+          handlers = handlerMap,
+          dirs = dirs,
+          ctx = ctx,
+          logger = logger,
+          completed = completed
         )
+        .useForever
+
+      worker = new Worker {
+        override def waitForComplete: IO[Unit] =
+          completed.get
       }
 
-      // retrieve scheduler RPC client
-      // this will block until connection establishes
-      schedulerClient <- ctx.schedulerRpcClient(masterAddr)
+      mainFiber = ctx
+        .schedulerRpcClient(masterAddr)
+        .use(schedulerClient =>
+          registerWorkerToScheduler(schedulerClient, stateR, wtid, port, dirs, ctx)
+            .map(_ => program(worker))
+        )
 
-      // registration worker
-      wid <- registerWorkerToScheduler(schedulerClient, stateR, wtid, port, dirs, ctx).toResource
-    } yield new Worker {
-      override def waitForComplete: IO[Unit] =
-        completed.get
+      result <- serverFiber.race(mainFiber)
+    } yield result match {
+      case Left(_)      => throw new RuntimeException("server exited unexpectedly")
+      case Right(value) => value
     }
 
   def createWorkingDir(ctx: FileStorage): IO[Path] = {
