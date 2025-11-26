@@ -4,11 +4,17 @@ ThisBuild / scalaVersion := "2.13.16"
 ThisBuild / version := "0.1.0"
 ThisBuild / organization := "org.postech.csed332_25.red"
 
+// suppress unsafe memory access warning in JDK > 24 caused by netty
+ThisBuild / javaOptions ++= Seq("--sun-misc-unsafe-memory-access=allow", "--enable-native-access=ALL-UNNAMED")
+
 // Scalatest recommends turning this off since it implmenets its own
 // buffering algorithm.
 Test / logBuffered := false
 // reprint all errors at the bottom of the test suite run.
 Test / testOptions += Tests.Argument("-oG")
+// disable 
+
+Global / cancelable := true
 
 // Required by artima supersafe plugin, which comes with sclatest
 ThisBuild / resolvers += "Artima Maven Repository" at "https://repo.artima.com/releases"

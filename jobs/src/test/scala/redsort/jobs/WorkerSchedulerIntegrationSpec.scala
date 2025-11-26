@@ -104,10 +104,8 @@ class WorkerSchedulerIntegrationSpec extends AsyncFunSpec with BeforeAndAfterEac
             numWorkersPerMachine = 1,
             ctx = SchedulerTestCtx
           ) { scheduler =>
-            // run worker in background
-            val workerRes = for {
-              workerDeferred <- IO.deferred[Worker].toResource
-              fs <- IO.ref[Map[String, Array[Byte]]](Map()).toResource
+            for {
+              fs <- IO.ref[Map[String, Array[Byte]]](Map())
               _ <- Worker(
                 handlerMap = handlers,
                 masterAddr = new NetAddr("127.0.0.1", 5000 + portOffset),
@@ -116,15 +114,13 @@ class WorkerSchedulerIntegrationSpec extends AsyncFunSpec with BeforeAndAfterEac
                 wtid = 0,
                 port = 6000 + portOffset,
                 ctx = new WorkerTestCtx(fs)
-              ).use { worker => workerDeferred.complete(worker) >> IO.never }.background
-              worker <- workerDeferred.get.toResource
-            } yield worker
-
-            workerRes.use(worker => body(scheduler, worker))
+              ) { worker =>
+                body(scheduler, worker)
+              }
+            } yield ()
           }
         }
         .timeout(5.second)
-
   }
 
   test("worker registration", NetworkTest) {
