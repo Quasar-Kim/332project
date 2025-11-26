@@ -27,7 +27,7 @@ trait Worker {
 object Worker {
   private[this] val logger = new SourceLogger(getLogger, "worker")
 
-  def apply[T](
+  def apply(
       handlerMap: Map[String, JobHandler],
       masterAddr: NetAddr,
       inputDirectories: Seq[Path],
@@ -36,7 +36,7 @@ object Worker {
       port: Int,
       ctx: WorkerCtx,
       workingDirectory: Option[Path] = None
-  )(program: Worker => T): IO[T] =
+  )(program: Worker => IO[Unit]): IO[Unit] =
     for {
       // initialize state
       stateR <- SharedState.init
@@ -77,15 +77,12 @@ object Worker {
         .schedulerRpcClient(masterAddr)
         .use(schedulerClient =>
           registerWorkerToScheduler(schedulerClient, stateR, wtid, port, dirs, ctx)
-            .map(_ => program(worker))
+            .flatMap(_ => program(worker))
         )
 
       _ <- logger.info(s"worker (port=$port, wtid=$wtid) started, waiting for scheduler server...")
-      result <- serverFiber.race(mainFiber)
-    } yield result match {
-      case Left(_)      => throw new RuntimeException("server exited unexpectedly")
-      case Right(value) => value
-    }
+      _ <- serverFiber.race(mainFiber)
+    } yield ()
 
   def createWorkingDir(ctx: FileStorage): IO[Path] = {
     for {
