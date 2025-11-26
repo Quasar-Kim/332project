@@ -27,12 +27,12 @@ object SyncJobHandler extends JobHandler {
       filesToDelete <- IO.pure {
         val remoteFiles =
           args
-            .map(_.unpack[FileEntryMsg].path)
+            .map(path => Directories.resolvePath(dirs, Path(path.unpack[FileEntryMsg].path)))
             .filter(_.startsWith(dirs.workingDirectory.toString))
             .toSet
-        val localFiles = localEntries.keySet
+        val localFiles = localEntries.keySet.map(Path(_))
         localFiles &~ remoteFiles
       }
-      _ <- filesToDelete.toList.traverse(ctx.delete(_))
+      _ <- filesToDelete.toList.traverse(p => ctx.delete(p.toString))
     } yield None
 }
