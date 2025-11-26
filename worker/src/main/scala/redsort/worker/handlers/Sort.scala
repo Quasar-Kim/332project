@@ -64,9 +64,6 @@ class JobSorter extends JobHandler {
 
     } yield ()
 
-    program.timed.attempt.map {
-      case Right((duration, _)) => Some("OK".getBytes())
-      case Left(err)            => Some("FAIL".getBytes())
-    }
+    program.map { _ => Some("OK".getBytes()) }
   }
 }
