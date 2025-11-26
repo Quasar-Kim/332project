@@ -6,7 +6,10 @@ import org.scalamock.stubs.Stub
 import redsort.AsyncSpec
 import redsort.jobs.Common.FileEntry
 import redsort.jobs.context.ReplicatorCtx
+import redsort.jobs.context.interface.FileStorage
 import redsort.jobs.messages.ReplicationErrorKind.{CONNECTION_ERROR, FILE_NOT_FOUND_ERROR}
+
+import java.nio.charset.StandardCharsets
 
 class FileReplicationServiceSpec extends AsyncSpec {
   def fixture = new {
@@ -15,8 +18,10 @@ class FileReplicationServiceSpec extends AsyncSpec {
     // make a file
     val content = "qwerty"
     val path = "file.txt"
-    val contentBytes: Stream[IO, Byte] = Stream.emits(content.getBytes).covary[IO] // stream of bytes for writeFile
-    val entry: FileEntry = FileEntry(path, content.length.toLong, Seq(myMid)) // file that exists on this machine only
+    val contentBytes: Stream[IO, Byte] =
+      Stream.emits(content.getBytes).covary[IO] // stream of bytes for writeFile
+    val entry: FileEntry =
+      FileEntry(path, content.length.toLong, Seq(myMid)) // file that exists on this machine only
 
     // network stub
     val network: Stub[NetworkAlgebra[IO]] = stub[NetworkAlgebra[IO]]
@@ -32,7 +37,17 @@ class FileReplicationServiceSpec extends AsyncSpec {
       else Resource.eval(IO.raiseError(new RuntimeException(s"unexpected machine id -- $mid")))
     }
 
-    val fileService = new FileReplicationService(network, myMid)
+    // storage stub
+    val storage: Stub[FileStorage] = stub[FileStorage]
+    stubbed(storage.writeAll _).returns { arg =>
+      val filename = arg._1
+      val fileContent = new String(arg._2, StandardCharsets.UTF_8)
+      println("wrote to " + filename)
+      println("content: " + fileContent)
+      IO.unit
+    }
+
+    val fileService = new FileReplicationService(network, myMid, storage)
   }
 
   behavior of "fileService.push"
