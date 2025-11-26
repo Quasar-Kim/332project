@@ -8,6 +8,6 @@ import redsort.jobs.messages.ReplicatorLocalServiceFs2Grpc
 trait ReplicatorLocalRpcServer {
   def replicatorLocalRpcServer(
       grpc: ReplicatorLocalServiceFs2Grpc[IO, Metadata],
-      addr: NetAddr
+      port: Int
   ): Resource[IO, Server]
 }

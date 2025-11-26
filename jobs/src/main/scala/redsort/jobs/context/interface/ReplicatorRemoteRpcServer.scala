@@ -8,6 +8,6 @@ import redsort.jobs.messages.ReplicatorRemoteServiceFs2Grpc
 trait ReplicatorRemoteRpcServer {
   def replicatorRemoteRpcServer(
       grpc: ReplicatorRemoteServiceFs2Grpc[IO, Metadata],
-      addr: NetAddr
+      port: Int
   ): Resource[IO, Server]
 }
