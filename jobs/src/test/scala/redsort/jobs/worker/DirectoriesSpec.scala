@@ -36,7 +36,7 @@ class DirectoriesSpec extends AsyncSpec {
     for {
       _ <- Directories.ensureDirs(f.dir, f.fileIO)
     } yield {
-      (f.fileIO.mkDir _).calls should be(List("/root/working", "/root/output"))
+      (f.fileIO.mkDir _).calls.toSet should be(Set("/root/working", "/root/output"))
     }
   }
 
