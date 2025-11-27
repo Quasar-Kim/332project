@@ -11,6 +11,42 @@ import scala.jdk.CollectionConverters._
 import java.io.IOException
 import java.io.File
 import redsort.Logging.fileLogger
+import redsort.master.{Args => MasterArgs}
+import redsort.worker.{Configuration => WorkerArgs}
+import redsort.worker.CmdParser.workingDir
+import redsort.jobs.Common.NetAddr
+import fs2.io.file.{Path => Fs2Path}
+
+final case class TestConfig(
+    name: String,
+    numMachines: Int,
+    numInputDirs: Int,
+    numFilesPerInputDir: Int,
+    recordsPerFile: Int,
+    masterPort: Int,
+    numWorkerThreads: Int,
+    workerBasePort: Int,
+    baseDir: Path
+) {
+  def masterArgs: MasterArgs =
+    new MasterArgs(
+      numMachines = numMachines,
+      port = masterPort,
+      threads = numWorkerThreads
+    )
+
+  def workerArgs(mid: Int): WorkerArgs = {
+    val workerDir = Fs2Path.fromNioPath(baseDir.resolve(s"worker$mid"))
+    new WorkerArgs(
+      masterAddress = new NetAddr("127.0.0.1", masterPort),
+      inputDirs = (0 until numInputDirs).map(i => workerDir / s"input$i"),
+      outputDir = workerDir / "output",
+      workingDir = None,
+      threads = numWorkerThreads,
+      port = workerBasePort + 10 * mid
+    )
+  }
+}
 
 object DistributedSortingTestHelper {
 
@@ -28,40 +64,51 @@ object DistributedSortingTestHelper {
       numMachines: Int,
       numInputDirs: Int,
       numFilesPerInputDir: Int,
-      recordsPerFile: Int
-  )(body: String => IO[Seq[Int]]): IO[Unit] =
+      recordsPerFile: Int,
+      numWorkerThreads: Int,
+      masterPort: Int = 5000,
+      workerBasePort: Int = 6001
+  )(body: TestConfig => IO[Seq[Int]]): IO[Unit] =
     fileLogger(name).use { logger =>
       for {
+        // create test config
         baseDir <- IO(Paths.get("target", "test-sorting", name).toAbsolutePath)
-        _ <- IO(prepare(baseDir, numMachines, numInputDirs, numFilesPerInputDir, recordsPerFile))
-        machineOrder <- body(baseDir.toString)
-        _ <- IO(validate(baseDir, machineOrder))
+        config = new TestConfig(
+          name = name,
+          numMachines = numMachines,
+          numInputDirs = numInputDirs,
+          numFilesPerInputDir = numFilesPerInputDir,
+          recordsPerFile = recordsPerFile,
+          masterPort = masterPort,
+          numWorkerThreads = numWorkerThreads,
+          workerBasePort = workerBasePort,
+          baseDir = baseDir
+        )
+
+        // prepare, run, then validate.
+        _ <- IO(prepare(config))
+        machineOrder <- body(config)
+        _ <- IO(validate(config.baseDir, machineOrder))
       } yield ()
     }
 
-  private def prepare(
-      baseDir: Path,
-      numMachines: Int,
-      numInputDirs: Int,
-      numFilesPerInputDir: Int,
-      recordsPerFile: Int
-  ) = {
+  private def prepare(config: TestConfig) = {
     // 0. Clean up previous run if exists
-    if (Files.exists(baseDir)) {
-      deleteRecursively(baseDir)
+    if (Files.exists(config.baseDir)) {
+      deleteRecursively(config.baseDir)
     }
 
     // 1. Scaffold directory structure
-    val workers = (0 until numMachines).toSeq
-    val inputDirs = (0 until numInputDirs).map(i => s"input$i")
+    val workers = (0 until config.numMachines).toSeq
+    val inputDirs = (0 until config.numInputDirs).map(i => s"input$i")
 
     workers.foreach { w =>
-      val workerPath = baseDir.resolve(s"worker$w")
+      val workerPath = config.baseDir.resolve(s"worker$w")
       inputDirs.foreach { i =>
         Files.createDirectories(workerPath.resolve(i))
       }
     }
-    Files.createDirectories(baseDir.resolve("master"))
+    Files.createDirectories(config.baseDir.resolve("master"))
 
     // 2. Run gensort
     // We maintain a running offset to ensure data is unique/contiguous across the whole set.
@@ -70,20 +117,21 @@ object DistributedSortingTestHelper {
     for {
       w <- workers
       i <- inputDirs
-      fileIdx <- 0 until numFilesPerInputDir
+      fileIdx <- 0 until config.numFilesPerInputDir
     } {
-      val outFile = baseDir.resolve(s"worker$w").resolve(i).resolve(s"input.$fileIdx")
+      val outFile = config.baseDir.resolve(s"worker$w").resolve(i).resolve(s"input.$fileIdx")
 
       // gensort -b<offset> <count> <output_file>
       // -b specifies the starting record index to ensure correct global sorting potential
-      val cmd = Seq("gensort", s"-b$currentOffset", recordsPerFile.toString, outFile.toString)
+      val cmd =
+        Seq("gensort", s"-b$currentOffset", config.recordsPerFile.toString, outFile.toString)
 
       val exitCode = cmd.!
       if (exitCode != 0) {
         throw new RuntimeException(s"gensort failed for $outFile with exit code $exitCode")
       }
 
-      currentOffset += recordsPerFile
+      currentOffset += config.recordsPerFile
     }
   }
 
@@ -125,23 +173,24 @@ object DistributedSortingTestHelper {
 
     // validate sort order
     // first create summary file for each partition files.
-    val summaryFiles = allOutputFiles.map(p => {
+    val allSummaryFiles = allOutputFiles.map(p => {
       val fileName = p.getFileName.toString
       val index = fileName.substring("partition.".length, fileName.length).toInt
-      val outFilePath = p.getParent().resolve(s"out$index.sum")
-
-      val cmd = Seq("valsort", "-o", outFilePath.toString, p.toString)
+      val summaryFilePath = p.getParent().getParent().resolve(s"out$index.sum")
+      val cmd = Seq("valsort", "-o", summaryFilePath.toString, p.toString)
       val exit = cmd.!
 
       if (exit != 0) {
         throw new RuntimeException(s"valsort summary generation failed for file ${p}.")
       }
+
+      summaryFilePath
     })
 
     // then concatenate all summary files to all.sum file
-    val catCmd = Seq("cat") ++ allOutputFiles.map(_.toString)
+    val catCmd = Seq("cat") ++ allSummaryFiles.map(_.toString)
     val summaryFile = baseDir.resolve("all.sum")
-    val catExit = (catCmd #>> new File(summaryFile.toString)).!
+    val catExit = (catCmd #> new File(summaryFile.toString)).!
     if (catExit != 0) {
       throw new Error(s"failed to concatenate summary files to ${summaryFile.toString}")
     }

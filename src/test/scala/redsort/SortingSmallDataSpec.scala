@@ -9,34 +9,35 @@ import org.scalatest.tags.Slow
 import java.io.File
 import java.nio.file.Paths
 import java.nio.file.Files
-import redsort.master.{Args, Main => MasterMain}
+import redsort.master.{Args => MasterArgs, Main => MasterMain}
+import redsort.worker.{Configuration => WorkerArgs, Main => WorkerMain}
 import org.scalatest.funspec.AsyncFunSpec
 import cats.effect.testing.scalatest.AsyncIOSpec
 import org.scalatest.funsuite.AsyncFunSuite
+import fs2.io.file.Path
+import redsort.jobs.Common.NetAddr
 import redsort.master.CmdParser.numMachines
 
 @Slow
 class SortingSmallDataSpec extends AsyncFunSuite with AsyncIOSpec {
 
-  test("Sorting 80KB (80) entries") {
+  test("sorting-1x1-1kb") {
     testSorting(
-      name = "sorting-2x4-80kb",
-      numMachines = 2,
-      numInputDirs = 2,
-      numFilesPerInputDir = 2,
-      recordsPerFile = 100
-    ) { baseDir =>
+      name = "sorting-1x1-1kb",
+      numMachines = 1,
+      numInputDirs = 1,
+      numFilesPerInputDir = 1,
+      recordsPerFile = 100,
+      numWorkerThreads = 1
+    ) { config =>
       (
-        MasterMain.startScheduler(new Args(numMachines = 2, port = 5000, threads = 4)),
-        (0 until 2).toList.map(i => IO.pure(6000 + i * 10)).parSequence.void
-      ).parMapN((machineOrder, _) =>
-        machineOrder
-          .filter { case (wid, _) => wid.wtid == 0 }
-          .map { case (wid, addr) => (wid.mid, (addr.port - 6000) / 10) }
-          .toSeq
-          .sortBy { case (mid, i) => mid }
-          .map { case (mid, i) => i }
-      )
+        MasterMain
+          .startScheduler(config.masterArgs),
+        (0 until 1)
+          .map(mid => WorkerMain.workerProgram(config.workerArgs(mid)))
+          .toList
+          .parSequence
+      ).parMapN((machineOrder, _) => Seq(0))
     }
   }
 }
