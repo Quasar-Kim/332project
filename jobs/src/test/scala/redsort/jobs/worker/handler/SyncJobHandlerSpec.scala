@@ -14,8 +14,8 @@ class SyncJobHandlerSpec extends AsyncSpec {
 
   it should "remove intermediate files not present in args" in {
     val args = Seq(
-      new FileEntryMsg(path = "/working/a", size = 1024, replicas = Seq(0)),
-      new FileEntryMsg(path = "/input/x", size = 1024, replicas = Seq(0))
+      new FileEntryMsg(path = "@{working}/a", size = 1024, replicas = Seq(0)),
+      new FileEntryMsg(path = "@{input}/x", size = 1024, replicas = Seq(0))
     )
 
     for {

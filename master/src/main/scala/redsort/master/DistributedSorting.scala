@@ -15,7 +15,7 @@ import redsort.jobs.SourceLogger
 object DistributedSorting {
   private[this] val logger = new SourceLogger(getLogger, "master")
 
-  def run(scheduler: Scheduler): IO[Unit] =
+  def run(scheduler: Scheduler): IO[Map[Wid, NetAddr]] =
     for {
       // print master IP:port
       netAddr <- scheduler.netAddr
@@ -34,7 +34,7 @@ object DistributedSorting {
       // calculate partitions
       samples <- IO.pure(getSamplesFromResults(samplingResult))
       _ <- logger.info(
-        s"calculating partitions from ${samples.size() / 1024 / 1024} MB samples..."
+        s"calculated partitions from ${samples.size() / 1024 / 1024} MB samples..."
       )
       partitions <- IO.pure(
         Partition.findPartitions(
@@ -57,10 +57,11 @@ object DistributedSorting {
       mergeResult <- scheduler.runJobs(mergeStep(partitionResult.files))
 
       // finalize
+      workerAddrs <- scheduler.workerAddrs
       _ <- logger.info("shutting down cluster...")
       _ <- scheduler.complete
       _ <- logger.info("done!")
-    } yield ()
+    } yield workerAddrs
 
   private def getSamplesFromResults(result: JobExecutionResult): ByteString =
     result.results

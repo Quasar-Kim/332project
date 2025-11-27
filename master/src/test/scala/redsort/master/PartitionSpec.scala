@@ -26,7 +26,7 @@ class PartitionSpec extends AnyFunSpec with Matchers {
       // calculate expected partitions
       val sortedKeys = Partition.sortedKeys(samples)
       val expectedPartitions =
-        Seq(sortedKeys(10), sortedKeys(20), Partition.KEY_UPPER_BOUND)
+        Seq(sortedKeys(10), sortedKeys(20), Partition.MAX_KEY)
       partitions should be(expectedPartitions)
     }
 
@@ -48,7 +48,7 @@ class PartitionSpec extends AnyFunSpec with Matchers {
           sortedKeys(17),
           sortedKeys(21),
           sortedKeys(25),
-          Partition.KEY_UPPER_BOUND
+          Partition.MAX_KEY
         )
       partitions should be(expectedPartitions)
     }

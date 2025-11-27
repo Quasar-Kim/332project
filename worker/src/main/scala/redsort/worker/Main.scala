@@ -105,10 +105,10 @@ object Main extends CommandIOApp(name = "worker", header = "worker binary") {
     }
 
   val handlerMap: Map[String, JobHandler] = Map(
-    "sample" -> new handlers.JobSampler(),
-    "sort" -> new handlers.JobSorter(),
-    "partition" -> new handlers.JobPartitioner(),
-    "merge" -> new handlers.JobMerger()
+    "sample" -> new handlers.SampleJobHandler(),
+    "sort" -> new handlers.SortJobHandler(),
+    "partition" -> new handlers.PartitionJobHandler(),
+    "merge" -> new handlers.MergeJobHandler()
   )
 
   def workerProgram(config: Configuration): IO[Unit] = {

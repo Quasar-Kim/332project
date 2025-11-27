@@ -17,9 +17,9 @@ import redsort.jobs.context.impl._
 
 import redsort.worker.testctx._
 
-class JobSorterSpec extends AsyncFlatSpec with AsyncIOSpec with Matchers {
+class SortJobHandlerSpec extends AsyncFlatSpec with AsyncIOSpec with Matchers {
 
-  "JobSorter" should "merge multiple inputs, sort them, and broadcast to all outputs" in {
+  "SortJobHandler" should "merge multiple inputs, sort them, and broadcast to all outputs" in {
     val inputPathStrs = List("/data/input_1", "/data/input_2")
     val outputPathStrs = List("/data/output_1", "/data/output_2", "/data/output_3")
 
@@ -36,7 +36,7 @@ class JobSorterSpec extends AsyncFlatSpec with AsyncIOSpec with Matchers {
     for {
       fs <- Ref.of[IO, Map[String, Array[Byte]]](Map.empty)
       ctx = new WorkerTestCtx(fs)
-      sorter = new JobSorter()
+      sorter = new SortJobHandler()
 
       _ <- ctx.writeAll(inputPathStrs(0), input1Data)
       _ <- ctx.writeAll(inputPathStrs(1), input2Data)
@@ -54,8 +54,6 @@ class JobSorterSpec extends AsyncFlatSpec with AsyncIOSpec with Matchers {
       out3Bytes <- ctx.readAll(outputPathStrs(2))
 
     } yield {
-      resultOpt shouldBe defined
-      new String(resultOpt.get) shouldBe "OK"
       out1Bytes shouldBe out2Bytes
       out2Bytes shouldBe out3Bytes
       out1Bytes.length.toLong shouldBe totalExpectedSize

@@ -22,6 +22,7 @@ import redsort.jobs.scheduler.SchedulerFiberEvents.Complete
 import redsort.jobs.scheduler.SchedulerFiberEvents.WorkerCompleted
 import redsort.jobs.messages.WorkerHello
 import redsort.jobs.messages.NetAddrMsg
+import scala.collection.immutable
 
 /** Scheduler fiber.
   */
@@ -230,6 +231,7 @@ object SchedulerFiber {
             // if all jobs are completed,
             //   - update file entries of each machine.
             //   - send JobCompleted event to main fiber.
+            //   - empty completed job list.
             // otherwise submit another job into workers.
             done <- IO.pure(updatedState.schedulerFiber.workers.forall { case (_, state) =>
               state.pendingJobs.isEmpty && state.runningJob.isEmpty
@@ -238,13 +240,14 @@ object SchedulerFiber {
               if (done) {
                 for {
                   _ <- logger.info("all jobs completed")
-                  updatedState <- IO.pure(updateFileEntries(updatedState))
+                  updatedState <- updateFileEntries(updatedState)
                   _ <- mainFiberQueue.offer(
                     new MainFiberEvents.JobCompleted(
                       jobResults(updatedState.schedulerFiber.workers),
                       updatedState.schedulerFiber.files
                     )
                   )
+                  updatedState <- IO.pure(emptyCompletedJobs(updatedState))
                   _ <- stateR.set(
                     updatedState
                       .focus(_.schedulerFiber.state)
@@ -336,7 +339,7 @@ object SchedulerFiber {
       }
   }
 
-  def updateFileEntries(state: SharedState): SharedState = {
+  def updateFileEntries(state: SharedState): IO[SharedState] = {
     // for each machine, collect all completed jobs.
     val completedJobsPerMachine = state.schedulerFiber.workers
       .groupBy(_._1.mid)
@@ -346,8 +349,8 @@ object SchedulerFiber {
       )
       .to(Map)
 
-    // collect deleted and added intemrediate files.
-    val deletedFiles = completedJobsPerMachine.view
+    // collect files to be deleted and added intemrediate files.
+    val obsoleteFiles = completedJobsPerMachine.view
       .mapValues { jobs =>
         jobs.map(_.spec.inputs.map(_.path).filter(_.startsWith("@{working}"))).flatten.to(Seq)
       }
@@ -364,13 +367,27 @@ object SchedulerFiber {
     // apply changes to files
     val files =
       state.schedulerFiber.files
-        .lazyZip(deletedFiles)
+        .lazyZip(obsoleteFiles)
         .lazyZip(addedFileEntries)
         .map { case ((mid, entries), (_, deletions), (_, additions)) =>
           (mid, entries.removedAll(deletions).concat(additions))
         }
         .to(Map)
-    state.focus(_.schedulerFiber.files).replace(files)
+
+    // log debug informations
+    val addedFiles = addedFileEntries.view.mapValues(_.keys.toSeq).toMap
+    for {
+      _ <- logger.debug(s"new files: ${addedFiles}")
+      _ <- logger.debug(s"obsolete files: $obsoleteFiles")
+    } yield state.focus(_.schedulerFiber.files).replace(files)
+  }
+
+  def emptyCompletedJobs(state: SharedState): SharedState = {
+    state.focus(_.schedulerFiber.workers).modify { workerStates =>
+      workerStates.view.mapValues { case workerState =>
+        workerState.focus(_.completedJobs).replace(immutable.Queue.empty)
+      }.toMap
+    }
   }
 
   def jobResults(workerStates: Map[Wid, WorkerState]): Seq[Tuple2[JobSpec, JobResult]] =

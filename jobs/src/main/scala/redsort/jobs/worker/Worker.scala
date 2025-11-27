@@ -27,7 +27,7 @@ trait Worker {
 object Worker {
   private[this] val logger = new SourceLogger(getLogger, "worker")
 
-  def apply[T](
+  def apply(
       handlerMap: Map[String, JobHandler],
       masterAddr: NetAddr,
       inputDirectories: Seq[Path],
@@ -36,7 +36,7 @@ object Worker {
       port: Int,
       ctx: WorkerCtx,
       workingDirectory: Option[Path] = None
-  )(program: Worker => T): IO[T] =
+  )(program: Worker => IO[Unit]): IO[Unit] =
     for {
       // initialize state
       stateR <- SharedState.init
@@ -46,7 +46,7 @@ object Worker {
       // create a temporary directory and use it as a working directory
       workDir <- workingDirectory match {
         case Some(dir) => IO.pure(dir)
-        case None      => createWorkingDir(ctx)
+        case None      => getWorkingDir(outputDirectory)
       }
       dirs <- Directories
         .init(
@@ -77,25 +77,18 @@ object Worker {
         .schedulerRpcClient(masterAddr)
         .use(schedulerClient =>
           registerWorkerToScheduler(schedulerClient, stateR, wtid, port, dirs, ctx)
-            .map(_ => program(worker))
+            .flatMap(_ => program(worker))
         )
 
       _ <- logger.info(s"worker (port=$port, wtid=$wtid) started, waiting for scheduler server...")
-      result <- serverFiber.race(mainFiber)
-    } yield result match {
-      case Left(_)      => throw new RuntimeException("server exited unexpectedly")
-      case Right(value) => value
-    }
+      _ <- serverFiber.race(mainFiber)
+      _ <- finalize(dirs, ctx)
+    } yield ()
 
-  def createWorkingDir(ctx: FileStorage): IO[Path] = {
+  def getWorkingDir(outputDirectory: Path): IO[Path] = {
     for {
       timestamp <- IO(LocalDateTime.now.format(DateTimeFormatter.ofPattern("YYYYMMdd_HHmmss")))
-      path <- IO(Path(System.getProperty("user.dir")) / s"redsort-working-$timestamp")
-      _ <- ctx.mkDir(path.toString).handleErrorWith {
-        case _: FileAlreadyExistsException => IO.unit
-        case e                             => IO.raiseError(e)
-      }
-    } yield path
+    } yield outputDirectory / s"redsort-working-$timestamp"
   }
 
   def registerWorkerToScheduler(
@@ -157,4 +150,7 @@ object Worker {
       remainingStorage = -1,
       entries = entries.flatten.toMap
     )
+
+  def finalize(dirs: Directories, ctx: FileStorage): IO[Unit] =
+    ctx.delete(dirs.workingDirectory.toString)
 }
