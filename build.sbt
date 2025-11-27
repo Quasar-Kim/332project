@@ -7,13 +7,6 @@ ThisBuild / organization := "org.postech.csed332_25.red"
 // suppress unsafe memory access warning in JDK > 24 caused by netty
 ThisBuild / javaOptions ++= Seq("--sun-misc-unsafe-memory-access=allow", "--enable-native-access=ALL-UNNAMED")
 
-// Scalatest recommends turning this off since it implmenets its own
-// buffering algorithm.
-Test / logBuffered := false
-// reprint all errors at the bottom of the test suite run.
-Test / testOptions += Tests.Argument("-oG")
-// disable 
-
 Global / cancelable := true
 
 // Required by artima supersafe plugin, which comes with sclatest
@@ -23,7 +16,14 @@ lazy val commonSettings = Seq(
   scalafmtOnCompile := true,
   libraryDependencies ++= deps,
   Compile / run / fork := true,
-  scalacOptions ++= Seq("-feature", "-language:reflectiveCalls", "-Werror", "-deprecation")
+  scalacOptions ++= Seq("-feature", "-language:reflectiveCalls", "-Werror", "-deprecation"),
+  // Scalatest recommends turning this off since it implmenets its own
+  // buffering algorithm.
+  Test / logBuffered := false,
+  // reprint all errors at the bottom of the test suite run.
+  Test / testOptions += Tests.Argument("-oG"),
+  // prevent logback throwing exception due to unknown reason
+  Test / fork := true,
 )
 
 lazy val jobs = (project in file("jobs"))
