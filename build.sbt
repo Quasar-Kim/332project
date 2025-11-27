@@ -4,9 +4,6 @@ ThisBuild / scalaVersion := "2.13.16"
 ThisBuild / version := "0.1.0"
 ThisBuild / organization := "org.postech.csed332_25.red"
 
-// suppress unsafe memory access warning in JDK > 24 caused by netty
-ThisBuild / javaOptions ++= Seq("--sun-misc-unsafe-memory-access=allow", "--enable-native-access=ALL-UNNAMED")
-
 Global / cancelable := true
 
 // Required by artima supersafe plugin, which comes with sclatest
