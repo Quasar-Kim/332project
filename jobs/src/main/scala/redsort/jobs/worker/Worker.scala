@@ -46,7 +46,7 @@ object Worker {
       // create a temporary directory and use it as a working directory
       workDir <- workingDirectory match {
         case Some(dir) => IO.pure(dir)
-        case None      => createWorkingDir(ctx)
+        case None      => createWorkingDir(ctx, outputDirectory)
       }
       dirs <- Directories
         .init(
@@ -84,10 +84,10 @@ object Worker {
       _ <- serverFiber.race(mainFiber)
     } yield ()
 
-  def createWorkingDir(ctx: FileStorage): IO[Path] = {
+  def createWorkingDir(ctx: FileStorage, outputDirectory: Path): IO[Path] = {
     for {
       timestamp <- IO(LocalDateTime.now.format(DateTimeFormatter.ofPattern("YYYYMMdd_HHmmss")))
-      path <- IO(Path(System.getProperty("user.dir")) / s"redsort-working-$timestamp")
+      path <- IO(outputDirectory / s"redsort-working-$timestamp")
       _ <- ctx.mkDir(path.toString).handleErrorWith {
         case _: FileAlreadyExistsException => IO.unit
         case e                             => IO.raiseError(e)
