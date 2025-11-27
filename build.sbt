@@ -53,3 +53,4 @@ lazy val root = (project in file("."))
     Test / parallelExecution := false
   )
   .dependsOn(master, worker)
+  .aggregate(jobs, master, worker)
