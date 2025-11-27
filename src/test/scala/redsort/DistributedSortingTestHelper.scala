@@ -66,8 +66,8 @@ object DistributedSortingTestHelper {
       numFilesPerInputDir: Int,
       recordsPerFile: Int,
       numWorkerThreads: Int,
-      masterPort: Int = 5000,
-      workerBasePort: Int = 6001
+      masterPort: Int,
+      workerBasePort: Int
   )(body: TestConfig => IO[Seq[Int]]): IO[Unit] =
     fileLogger(name).use { logger =>
       for {

@@ -28,7 +28,9 @@ class SortingSmallDataSpec extends AsyncFunSuite with AsyncIOSpec {
       numInputDirs = 1,
       numFilesPerInputDir = 1,
       recordsPerFile = 100,
-      numWorkerThreads = 1
+      numWorkerThreads = 1,
+      masterPort = 5100,
+      workerBasePort = 6101
     ) { config =>
       (
         MasterMain

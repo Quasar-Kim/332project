@@ -45,6 +45,7 @@ class WorkerSpec extends AsyncSpec {
         )
       )
     )
+    (ctxStub.delete _).returnsWith(IO.unit)
     (ctxStub.schedulerRpcClient _).returnsWith(Resource.eval(IO(schedulerClientStub)))
     val serverStub = stub[Server]
     (serverStub.start _).returnsWith(serverStub)
