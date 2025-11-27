@@ -10,6 +10,7 @@ import org.scalatest.matchers.should.Matchers
 import redsort.jobs.Common.FileEntry
 import redsort.jobs.worker.Directories
 import redsort.worker.gensort.gensort
+import redsort.worker.handlers._
 
 import redsort.jobs.context._
 import redsort.jobs.context.interface._
@@ -17,10 +18,9 @@ import redsort.jobs.context.impl._
 
 import redsort.worker.testctx._
 
-class JobMergerSpec extends AsyncFlatSpec with AsyncIOSpec with Matchers {
+class MergeJobHandlerSpec extends AsyncFlatSpec with AsyncIOSpec with Matchers {
 
-  "JobMerger" should "exactly merge 10,000 records (1MB)" in {
-
+  "MergeJobHandler" should "exactly merge 10,000 records (1MB)" in {
     val recordsPerFile = 10000
     val input1Data = gensort.generate(recordsPerFile)
     val input2Data = gensort.generate(recordsPerFile)
@@ -36,26 +36,26 @@ class JobMergerSpec extends AsyncFlatSpec with AsyncIOSpec with Matchers {
     for {
       fs <- Ref.of[IO, Map[String, Array[Byte]]](Map.empty)
       ctx = new WorkerTestCtx(fs)
-      sorter = new JobSorter()
-      merger = new JobMerger()
+      sorter = new SortJobHandler()
+      merger = new MergeJobHandler()
       _ <- ctx.writeAll(sortinputStr, input1Data)
       _ <- ctx.writeAll(sortinputStr2, input2Data)
 
-      resultOpt1 <- sorter.apply(
+      _ <- sorter.apply(
         args = Seq.empty,
         inputs = Seq(Path(sortinputStr)),
         outputs = Seq(Path(sortoutputStr)),
         ctx = ctx,
         d = dummyDirs
       )
-      resultOpt2 <- sorter.apply(
+      _ <- sorter.apply(
         args = Seq.empty,
         inputs = Seq(Path(sortinputStr2)),
         outputs = Seq(Path(sortoutputStr2)),
         ctx = ctx,
         d = dummyDirs
       )
-      resultOpt <- merger.apply(
+      _ <- merger.apply(
         args = Seq.empty,
         inputs = Seq(Path(sortoutputStr), Path(sortoutputStr2)),
         outputs = Seq(Path(mergedoutputStr)),
@@ -70,12 +70,6 @@ class JobMergerSpec extends AsyncFlatSpec with AsyncIOSpec with Matchers {
       outputBytes <- ctx.readAll(mergedoutputStr)
 
     } yield {
-      resultOpt1 shouldBe defined
-      new String(resultOpt1.get) shouldBe "OK"
-      resultOpt2 shouldBe defined
-      new String(resultOpt2.get) shouldBe "OK"
-      resultOpt shouldBe defined
-      new String(resultOpt.get) shouldBe "OK"
       outputSize shouldBe (recordsPerFile * 2 * 100) // 200 records, 100 bytes each
       outputBytes.takeRight(2) shouldBe Array('\r'.toByte, '\n'.toByte)
       gensort.validate(middleBytes1) shouldBe true
@@ -84,5 +78,4 @@ class JobMergerSpec extends AsyncFlatSpec with AsyncIOSpec with Matchers {
       outputBytes.grouped(100).map(_.toList).toSet shouldBe data
     }
   }
-
 }

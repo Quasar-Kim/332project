@@ -9,7 +9,7 @@ import redsort.jobs.Common._
 import redsort.jobs.context.interface._
 import redsort.jobs.worker._
 
-class JobMerger extends JobHandler {
+class MergeJobHandler extends JobHandler {
 
   private val MAX_FILE_SIZE = 128 * 1000 * 1000 // 128 MB
   private val RECORD_SIZE = 100 // 100 bytes
@@ -66,14 +66,14 @@ class JobMerger extends JobHandler {
       ctx: FileStorage,
       d: Directories
   ): IO[Option[Array[Byte]]] = {
-
+    // streams of input files, each chunk containing 100 byte record.
     val inputStreams: Seq[Stream[IO, Chunk[Byte]]] = inputs.map { path =>
       ctx.read(path.toString).chunkN(RECORD_SIZE)
     }
+
     val mergedStream: Stream[IO, Chunk[Byte]] = mergeAll(inputStreams)
 
-    val program: IO[Unit] = for {
-
+    for {
       _ <- mergedStream.zipWithIndex
         .groupAdjacentBy { case (_, idx) =>
           idx / RECORDS_PER_FILE
@@ -90,9 +90,6 @@ class JobMerger extends JobHandler {
         }
         .compile
         .drain
-
-    } yield ()
-
-    program.map { _ => Some("OK".getBytes()) }
+    } yield None
   }
 }
