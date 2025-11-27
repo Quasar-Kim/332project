@@ -46,7 +46,7 @@ object Worker {
       // create a temporary directory and use it as a working directory
       workDir <- workingDirectory match {
         case Some(dir) => IO.pure(dir)
-        case None      => createWorkingDir(ctx, outputDirectory)
+        case None      => getWorkingDir(outputDirectory)
       }
       dirs <- Directories
         .init(
@@ -85,15 +85,10 @@ object Worker {
       _ <- finalize(dirs, ctx)
     } yield ()
 
-  def createWorkingDir(ctx: FileStorage, outputDirectory: Path): IO[Path] = {
+  def getWorkingDir(outputDirectory: Path): IO[Path] = {
     for {
       timestamp <- IO(LocalDateTime.now.format(DateTimeFormatter.ofPattern("YYYYMMdd_HHmmss")))
-      path <- IO(outputDirectory / s"redsort-working-$timestamp")
-      _ <- ctx.mkDir(path.toString).handleErrorWith {
-        case _: FileAlreadyExistsException => IO.unit
-        case e                             => IO.raiseError(e)
-      }
-    } yield path
+    } yield outputDirectory / s"redsort-working-$timestamp"
   }
 
   def registerWorkerToScheduler(
