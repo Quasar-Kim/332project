@@ -240,13 +240,14 @@ object SchedulerFiber {
               if (done) {
                 for {
                   _ <- logger.info("all jobs completed")
-                  updatedState <- updateFileEntries(updatedState).map(emptyCompletedJobs(_))
+                  updatedState <- updateFileEntries(updatedState)
                   _ <- mainFiberQueue.offer(
                     new MainFiberEvents.JobCompleted(
                       jobResults(updatedState.schedulerFiber.workers),
                       updatedState.schedulerFiber.files
                     )
                   )
+                  updatedState <- IO.pure(emptyCompletedJobs(updatedState))
                   _ <- stateR.set(
                     updatedState
                       .focus(_.schedulerFiber.state)
