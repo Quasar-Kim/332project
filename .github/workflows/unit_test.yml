@@ -28,5 +28,15 @@ jobs:
         distribution: 'temurin'
         cache: 'sbt'
     - uses: sbt/setup-sbt@v1
+    - name: Install gensort
+      run: |
+        # 1. Download the tarball (using -O to ensure correct filename)
+        wget -O gensort.tar.gz https://www.ordinal.com/try.cgi/gensort-linux-1.5.tar.gz
+        
+        # 2. Extract the file
+        tar -xzf gensort.tar.gz
+        
+        # 3. Add the binary location to GITHUB_PATH (PATH may not does not persist across steps)
+        echo "$PWD/gensort-linux-1.5/64" >> $GITHUB_PATH
     - name: Run tests
       run: sbt test
