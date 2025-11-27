@@ -37,6 +37,6 @@ jobs:
         tar -xzf gensort.tar.gz
         
         # 3. Add the binary location to GITHUB_PATH (PATH may not does not persist across steps)
-        echo "$PWD/gensort-linux-1.5/64" >> $GITHUB_PATH
+        echo "$PWD/64" >> $GITHUB_PATH
     - name: Run tests
       run: sbt test
