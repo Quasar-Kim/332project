@@ -64,7 +64,7 @@ trait FileStorage {
 
   def save(path: String, data: Stream[IO, Byte]): IO[Unit]
 
-  /** Delete file.
+  /** Delete file or a directory.
     *
     * @param path
     *   absolute path to the file.

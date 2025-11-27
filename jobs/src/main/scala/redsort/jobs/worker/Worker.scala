@@ -82,6 +82,7 @@ object Worker {
 
       _ <- logger.info(s"worker (port=$port, wtid=$wtid) started, waiting for scheduler server...")
       _ <- serverFiber.race(mainFiber)
+      _ <- finalize(dirs, ctx)
     } yield ()
 
   def createWorkingDir(ctx: FileStorage, outputDirectory: Path): IO[Path] = {
@@ -154,4 +155,7 @@ object Worker {
       remainingStorage = -1,
       entries = entries.flatten.toMap
     )
+
+  def finalize(dirs: Directories, ctx: FileStorage): IO[Unit] =
+    ctx.delete(dirs.workingDirectory.toString)
 }
