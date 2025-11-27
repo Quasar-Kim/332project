@@ -19,7 +19,7 @@ import redsort.worker.testctx._
 
 class SampleJobHandlerSpec extends AsyncFlatSpec with AsyncIOSpec with Matchers {
 
-  "JobSampler" should "exactly sample 10,000 records (1MB)" in {
+  "SampleJobHandler" should "exactly sample 10,000 records (1MB)" in {
     val inputPathStr = "/data/input_gensort"
     val inputPath = Path(inputPathStr)
 
