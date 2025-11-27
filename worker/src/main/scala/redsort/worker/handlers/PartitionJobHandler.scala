@@ -22,14 +22,7 @@ import fs2.io.file.Files
 import fs2.Pipe
 
 class PartitionJobHandler extends JobHandler {
-
-  private val RECORD_SIZE = 100 // 100 bytes
-  private val MIN_KEY = ByteString.fromHex("00000000000000000000")
-  private val MAX_KEY = ByteString.fromHex("0100000000000000000000")
-
-  implicit val byteStringComparator: Ordering[ByteString] =
-    Ordering.comparatorToOrdering(ByteString.unsignedLexicographicalComparator())
-
+  import PartitionJobHandler._
   override def apply(
       args: Seq[ProtobufAny],
       inputs: Seq[Path],
@@ -73,6 +66,15 @@ class PartitionJobHandler extends JobHandler {
       _ <- stream.compile.drain
     } yield None
   }
+}
+
+object PartitionJobHandler {
+  val RECORD_SIZE = 100 // 100 bytes
+  val MIN_KEY = ByteString.fromHex("00" * 10)
+  val MAX_KEY = ByteString.fromHex("ff" * 11)
+
+  implicit val byteStringComparator: Ordering[ByteString] =
+    Ordering.comparatorToOrdering(ByteString.unsignedLexicographicalComparator())
 
   def partitionsFromArgs(args: Seq[ProtobufAny]): Seq[Tuple2[ByteString, ByteString]] = {
     val ends = args.map(_.unpack[BytesArg].value)
@@ -86,5 +88,4 @@ class PartitionJobHandler extends JobHandler {
     val result = (key >= p._1) && (key < p._2)
     result
   }
-
 }

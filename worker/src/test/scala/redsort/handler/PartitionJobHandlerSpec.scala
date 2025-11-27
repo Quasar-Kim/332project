@@ -23,11 +23,9 @@ import scala.math.Ordering.comparatorToOrdering
 import scala.math.Ordering.Implicits._
 
 import redsort.worker.testctx._
+import redsort.worker.handlers.PartitionJobHandler._
 
 class PartitionJobHandlerSpec extends AsyncFlatSpec with AsyncIOSpec with Matchers {
-
-  val MAX_KEY = ByteString.fromHex("0100000000000000000000")
-
   def makeArgFromByteString(bytes: ByteString): ProtobufAny = {
     any.Any.pack(new BytesArg(value = bytes))
   }
@@ -43,7 +41,16 @@ class PartitionJobHandlerSpec extends AsyncFlatSpec with AsyncIOSpec with Matche
     val inputContents = records.fold(ByteString.empty)((acc, s) => acc.concat(s))
   }
 
-  "PartitionJobHandler" should "separates simple data in the partition (left inclusive)" in {
+  "PartitionJobHandler.isInPartition" should "determine whether key is in partition using lexicographical ordering" in {
+    val key = ByteString.fromHex("11112233445566778899")
+    val partition = (
+      ByteString.fromHex("11112233445566778899"),
+      MAX_KEY
+    )
+    isInPartition(key, partition) should be(true)
+  }
+
+  "PartitionJobHandler.apply" should "separates simple data in the partition (left inclusive)" in {
     val f = fixture
     val inputPathStr = "/data/input_simple"
     val outputPathStrs = List("/data/partition1", "/data/partition2")
