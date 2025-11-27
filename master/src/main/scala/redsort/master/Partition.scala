@@ -3,7 +3,7 @@ package redsort.master
 import com.google.protobuf.ByteString
 
 object Partition {
-  val KEY_UPPER_BOUND = ByteString.fromHex("1000000000000000000000")
+  val MAX_KEY = ByteString.fromHex("ff" * 11)
 
   /** Find split points that partitions sorted sequence of samples into equal sized subsequences.
     * i-th return value denotes end of i-th subsequence (exclusive) and start (i+1)th subsequence
@@ -21,14 +21,14 @@ object Partition {
     val keys = sortedKeys(samples)
     val numSamples = keys.size
 
-    if (numPartitions <= 1 || numSamples == 0) return Seq(KEY_UPPER_BOUND)
+    if (numPartitions <= 1 || numSamples == 0) return Seq(MAX_KEY)
 
     (1 until numPartitions)
       .map { i =>
         val splitPointIndex = (i.toLong * numSamples / numPartitions).toInt
         keys(splitPointIndex)
       }
-      .appended(KEY_UPPER_BOUND)
+      .appended(MAX_KEY)
   }
 
   implicit val byteStringOrdering: Ordering[ByteString] =
