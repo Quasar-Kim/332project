@@ -10,6 +10,7 @@ import redsort.jobs.Common.FileEntry
 import java.nio.file.StandardCopyOption
 import fs2.io.file.CopyFlags
 import fs2.io.file.CopyFlag
+import cats.effect.kernel.Resource.ExitCase.Succeeded
 
 /** Operations on file storage.
   */
@@ -47,18 +48,18 @@ trait FileStorage {
     * @return
     *   resource wrapping pipe to the new file.
     */
-  def create(path: String): Resource[IO, Pipe[IO, Byte, Unit]] = {
+  def create(path: String): Pipe[IO, Byte, Unit] = { in =>
     val tempPath = s"$path.tmp"
 
     // use .attempt.void to supress error if the file was never created
     def deleteTemp = delete(tempPath).attempt.void
 
-    Resource.makeCase(IO(write(tempPath))) {
-      case (_, Resource.ExitCase.Succeeded) =>
-        rename(tempPath, path).onError(_ => deleteTemp)
-      case (_, _) =>
-        deleteTemp
-    }
+    in
+      .through(write(tempPath))
+      .onFinalizeCase {
+        case Succeeded => rename(tempPath, path).onError(_ => deleteTemp)
+        case _         => deleteTemp
+      }
   }
 
   def save(path: String, data: Stream[IO, Byte]): IO[Unit]
@@ -115,13 +116,11 @@ trait FileStorage {
     *   contents of file as a array of bytes.
     */
   def writeAll(path: String, data: Array[Byte]): IO[Unit] =
-    create(path).use { sink =>
-      Stream
-        .chunk(Chunk.array(data))
-        .through(sink)
-        .compile
-        .drain
-    }
+    Stream
+      .chunk(Chunk.array(data))
+      .through(create(path))
+      .compile
+      .drain
 
   /** Make a directory.
     *
