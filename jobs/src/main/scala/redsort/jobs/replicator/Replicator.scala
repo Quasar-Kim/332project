@@ -10,8 +10,11 @@ import redsort.jobs.worker.Directories
 import redsort.jobs.Common.NetAddr
 import redsort.jobs.context.ReplicatorCtx
 import redsort.jobs.context.interface.ReplicatorLocalRpcServer
+import redsort.jobs.SourceLogger
+import org.log4s._
 
 object Replicator {
+  private[this] val logger = new SourceLogger(getLogger, "replicator")
 
   /** Start file replicator server. This method does not return unless internal error happenes.
     */
@@ -47,21 +50,24 @@ object Replicator {
       entries.map(_._2).toList.parTraverse(addr => ctx.replicatorRemoteRpcClient(addr))
     val mids = entries.map(_._1)
 
-    clientsRes.use { clients =>
-      val clientsMap = mids.lazyZip(clients).toMap
+    for {
+      _ <- logger.info(s"starting local replicator server at port $port")
+      _ <- clientsRes.use { clients =>
+        val clientsMap = mids.lazyZip(clients).toMap
 
-      val grpc = ReplicatorLocalService.init(
-        replicatorAddrs = replicatorAddrs,
-        clients = clientsMap,
-        ctx = ctx,
-        dirs = dirs
-      )
-      ctx
-        .replicatorLocalRpcServer(grpc, port)
-        .evalMap(server => IO(server.start()))
-        .useForever
-        .flatMap(_ => IO.unit)
-    }
+        val grpc = ReplicatorLocalService.init(
+          replicatorAddrs = replicatorAddrs,
+          clients = clientsMap,
+          ctx = ctx,
+          dirs = dirs
+        )
+        ctx
+          .replicatorLocalRpcServer(grpc, port)
+          .evalMap(server => IO(server.start()))
+          .useForever
+          .flatMap(_ => IO.unit)
+      }
+    } yield ()
   }
 
   def startRemoteRpcServer(
@@ -70,10 +76,14 @@ object Replicator {
       port: Int
   ): IO[Unit] = {
     val grpc = ReplicatorRemoteService.init(ctx = ctx, dirs = dirs)
-    ctx
-      .replicatorRemoteRpcServer(grpc, port)
-      .evalMap(server => IO(server.start()))
-      .useForever
-      .flatMap(_ => IO.unit)
+
+    for {
+      _ <- logger.info(s"starting remote replicator server at port $port")
+      _ <- ctx
+        .replicatorRemoteRpcServer(grpc, port)
+        .evalMap(server => IO(server.start()))
+        .useForever
+        .flatMap(_ => IO.unit)
+    } yield ()
   }
 }
