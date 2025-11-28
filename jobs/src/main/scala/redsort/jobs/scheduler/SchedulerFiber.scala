@@ -340,29 +340,39 @@ object SchedulerFiber {
   }
 
   def updateFileEntries(state: SharedState): IO[SharedState] = {
-    // for each machine, collect all completed jobs.
-    val completedJobsPerMachine = state.schedulerFiber.workers
-      .groupBy(_._1.mid)
-      .view
-      .mapValues(m =>
-        m.collect[Seq[Job]] { case (wid, state) => state.completedJobs.toSeq }.flatten
-      )
+    // Collect all completed jobs.
+    val completedJobs = state.schedulerFiber.workers.foldLeft(Seq.empty[Job]) {
+      case (acc, (wid, state)) =>
+        acc ++ state.completedJobs.to(Seq)
+    }
+    val completedJobsMap = state.schedulerFiber.workers.view
+      .filterKeys(_.wtid == 0)
+      .map { case (wid, _) => (wid.mid, completedJobs) }
       .to(Map)
 
     // collect files to be deleted and added intemrediate files.
-    val obsoleteFiles = completedJobsPerMachine.view
-      .mapValues { jobs =>
-        jobs.map(_.spec.inputs.map(_.path).filter(_.startsWith("@{working}"))).flatten.to(Seq)
-      }
-      .to(Map)
-    val addedFileEntries = completedJobsPerMachine.view
-      .mapValues { jobs =>
-        jobs
-          .map(_.result.get.outputs.map(entryMsg => (entryMsg.path, FileEntry.fromMsg(entryMsg))))
-          .flatten
-          .to(Map)
-      }
-      .to(Map)
+    val obsoleteFiles = completedJobsMap.map { case (mid, jobs) =>
+      val files = jobs
+        .map(
+          _.spec.inputs
+            .filter(entry => entry.path.startsWith("@{working}") && entry.replicas.contains(mid))
+            .map(_.path)
+        )
+        .flatten
+        .to(Seq)
+      (mid, files)
+    }
+    val addedFileEntries = completedJobsMap.map { case (mid, jobs) =>
+      val files = jobs
+        .map(
+          _.result.get.outputs
+            .filter(_.replicas.contains(mid))
+            .map(entryMsg => (entryMsg.path, FileEntry.fromMsg(entryMsg)))
+        )
+        .flatten
+        .to(Map)
+      (mid, files)
+    }
 
     // apply changes to files
     val files =
