@@ -37,19 +37,22 @@ message ReplicationResult {
   optional ReplicationStats stats = 3;
 }
 
-// TODO
 enum ReplicationErrorKind {
   UNKNOWN_ERROR = 0;
 }
 
-// TODO
 message ReplicationStats {}
 
-// TODO
-message ReadRequest {}
+message ReadRequest {
+  string path = 1;
+}
 
-// TODO
-message WriteRequest {}
 
-// TODO
-message Packet {}
+message WriteRequest {
+  optional string path = 1;
+  bytes data = 2;
+}
+
+message Packet {
+  bytes data = 1;
+}
