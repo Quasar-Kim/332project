@@ -39,7 +39,35 @@ class SortingSmallDataSpec extends AsyncFunSuite with AsyncIOSpec {
           .map(mid => WorkerMain.workerProgram(config.workerArgs(mid)))
           .toList
           .parSequence
-      ).parMapN((machineOrder, _) => Seq(0))
+      ).parMapN((_, _) => Seq(0))
+    }
+  }
+
+  test("sorting-2x1-1kb") {
+    testSorting(
+      name = "sorting-2x1-1kb",
+      numMachines = 2,
+      numInputDirs = 1,
+      numFilesPerInputDir = 1,
+      recordsPerFile = 100,
+      numWorkerThreads = 1,
+      masterPort = 5200,
+      workerBasePort = 6201
+    ) { config =>
+      (
+        MasterMain
+          .startScheduler(config.masterArgs),
+        (0 until 2)
+          .map(mid => WorkerMain.workerProgram(config.workerArgs(mid)))
+          .toList
+          .parSequence
+      ).parMapN((workerAddrs, _) =>
+        workerAddrs
+          .filter { case (wid, _) => wid.wtid == 0 }
+          .toList
+          .sortBy { case (_, addr) => addr.port }
+          .map { case (wid, _) => wid.mid }
+      )
     }
   }
 }

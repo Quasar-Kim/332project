@@ -34,7 +34,7 @@ object JobSystemException {
 
   def toMsg(e: JobSystemException): JobSystemError =
     new JobSystemError(
-      message = e.message,
+      message = if (e.message == null) "<null>" else e.message,
       cause = e.cause match {
         case Some(err) => Some(JobSystemException.toMsg(err))
         case None      => None

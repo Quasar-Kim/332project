@@ -18,10 +18,14 @@ import redsort.jobs.messages.WorkerFs2Grpc
 import io.grpc.Server
 import com.google.protobuf.empty.Empty
 import scala.concurrent.TimeoutException
+import redsort.jobs.messages.ReplicatorLocalServiceFs2Grpc
+import redsort.jobs.messages.ReplicatorRemoteServiceFs2Grpc
 
 class WorkerSpec extends AsyncSpec {
   def fixture = new {
     val schedulerClientStub = stub[SchedulerFs2Grpc[IO, Metadata]]
+    val replicatorLocalClientStub = stub[ReplicatorLocalServiceFs2Grpc[IO, Metadata]]
+    val replicatorRemoteClientStub = stub[ReplicatorRemoteServiceFs2Grpc[IO, Metadata]]
     val replicators =
       Map(0 -> new NetAddrMsg("1.2.3.3", 8000), 1 -> new NetAddrMsg("1.2.3.4", 8000))
     (schedulerClientStub.registerWorker _).returnsWith(
@@ -33,6 +37,8 @@ class WorkerSpec extends AsyncSpec {
         )
       )
     )
+    val serverStub = stub[Server]
+    (serverStub.start _).returnsWith(serverStub)
     val ctxStub = stub[WorkerCtx]
     (ctxStub.mkDir _).returns { arg => IO(arg) }
     (ctxStub.exists _).returnsWith(IO.pure(true))
@@ -47,8 +53,10 @@ class WorkerSpec extends AsyncSpec {
     )
     (ctxStub.delete _).returnsWith(IO.unit)
     (ctxStub.schedulerRpcClient _).returnsWith(Resource.eval(IO(schedulerClientStub)))
-    val serverStub = stub[Server]
-    (serverStub.start _).returnsWith(serverStub)
+    (ctxStub.replicatorLocalRpcClient _).returnsWith(Resource.eval(IO(replicatorLocalClientStub)))
+    (ctxStub.replicatorRemoteRpcClient _).returnsWith(Resource.eval(IO(replicatorRemoteClientStub)))
+    (ctxStub.replicatorLocalRpcServer _).returnsWith(Resource.eval(IO(serverStub)))
+    (ctxStub.replicatorRemoteRpcServer _).returnsWith(Resource.eval(IO(serverStub)))
 
     val dirs = new Directories(
       inputDirectories = Seq(Path("/sda")),
@@ -72,7 +80,9 @@ class WorkerSpec extends AsyncSpec {
           outputDirectory = Path("/output"),
           wtid = 0,
           port = 5000,
-          ctx = ctxStub
+          ctx = ctxStub,
+          replicatorLocalPort = 6000,
+          replicatorRemotePort = 7000
         ) { worker =>
           for {
             grpc <- grpcDeferred.get

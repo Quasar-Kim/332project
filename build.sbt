@@ -19,8 +19,6 @@ lazy val commonSettings = Seq(
   Test / logBuffered := false,
   // reprint all errors at the bottom of the test suite run.
   Test / testOptions += Tests.Argument("-oG"),
-  // prevent logback throwing exception due to unknown reason
-  Test / fork := true,
 )
 
 lazy val jobs = (project in file("jobs"))

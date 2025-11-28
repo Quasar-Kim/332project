@@ -8,3 +8,4 @@ trait WorkerCtx
     with ReplicatorLocalRpcClient
     with FileStorage
     with NetInfo
+    with ReplicatorCtx

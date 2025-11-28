@@ -9,6 +9,7 @@ import ch.qos.logback.core.FileAppender
 import ch.qos.logback.classic.spi.ILoggingEvent
 import ch.qos.logback.classic.Level
 import ch.qos.logback.classic
+import org.slf4j.helpers.SubstituteLoggerFactory
 
 /** XXX: Log will be polluted when multiple test cases are run concurrently. This can ber
   * workarounded by first identifying the failing test case, then re-running only that case. But
@@ -20,7 +21,21 @@ object Logging {
 
     val setup = IO {
       // sometimes `asInstanceOf[LoggerContext]` fails if logback is not fully initialized.
-      // request logger to ensure logback is initialized.
+      // try mutiple times until we can get logger.
+      var iLoggerFactory = LoggerFactory.getILoggerFactory
+      var attempts = 0
+      val maxAttempts = 10
+      while (iLoggerFactory.isInstanceOf[SubstituteLoggerFactory] && attempts < maxAttempts) {
+        // Trigger initialization again
+        LoggerFactory.getLogger(org.slf4j.Logger.ROOT_LOGGER_NAME)
+        Thread.sleep(50) // Give it a moment to bind
+        iLoggerFactory = LoggerFactory.getILoggerFactory
+        attempts += 1
+      }
+      if (iLoggerFactory.isInstanceOf[SubstituteLoggerFactory]) {
+        throw new IllegalStateException("SLF4J failed to bind to Logback after waiting.")
+      }
+
       val rootLogger = LoggerFactory.getLogger(org.slf4j.Logger.ROOT_LOGGER_NAME)
       val context = LoggerFactory.getILoggerFactory().asInstanceOf[LoggerContext]
 

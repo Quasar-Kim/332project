@@ -17,7 +17,6 @@ import redsort.jobs.SourceLogger
 import org.log4s.getLogger
 import redsort.jobs.Common.NetAddr
 import com.monovore.decline.effect.CommandIOApp
-import redsort.worker.CmdParser.workingDir
 
 trait ProductionWorkerCtx
     extends WorkerCtx
@@ -25,6 +24,9 @@ trait ProductionWorkerCtx
     with ProductionWorkerRpcServer
     with ProductionSchedulerRpcClient
     with ProductionReplicatorLocalRpcClient
+    with ProductionReplicatorLocalRpcServer
+    with ProductionReplicatorRemoteRpcClient
+    with ProductionReplicatorRemoteRpcServer
     with ProductionNetInfo
 
 // container of command line options
@@ -34,7 +36,8 @@ final case class Configuration(
     outputDir: Path,
     workingDir: Option[Path],
     threads: Int,
-    port: Int
+    port: Int,
+    replicatorLocalPort: Int
 )
 object Configuration {
   def apply(
@@ -43,9 +46,18 @@ object Configuration {
       outputDir: Path,
       workingDir: Option[Path],
       threads: Int,
-      port: Int
+      port: Int,
+      replicatorLocalPort: Int
   ) =
-    new Configuration(masterAddress, inputDirs, outputDir, workingDir, threads, port)
+    new Configuration(
+      masterAddress,
+      inputDirs,
+      outputDir,
+      workingDir,
+      threads,
+      port,
+      replicatorLocalPort
+    )
 }
 
 // command line parser
@@ -93,14 +105,31 @@ object CmdParser {
       .option[Int]("port", "port number of first worker (default: 6001)", metavar = "port")
       .withDefault(6001)
 
+  val replicatorLocalPort: Opts[Int] =
+    Opts
+      .option[Int](
+        "replicator-local-port",
+        "port number of replicator local service (default: 7000)",
+        metavar = "port"
+      )
+      .withDefault(7000)
+
   val parser: Opts[Configuration] =
-    (masterAddr, inputDir, outputDir, workingDir, threads, port).mapN(Configuration.apply)
+    (
+      masterAddr,
+      inputDir,
+      outputDir,
+      workingDir,
+      threads,
+      port,
+      replicatorLocalPort
+    ).mapN(Configuration.apply)
 }
 
 object Main extends CommandIOApp(name = "worker", header = "worker binary") {
   private[this] val logger = new SourceLogger(getLogger, "workerBin")
   override def main: Opts[IO[ExitCode]] =
-    CmdParser.parser.map { case config @ Configuration(_, _, _, _, _, _) =>
+    CmdParser.parser.map { case config @ Configuration(_, _, _, _, _, _, _) =>
       workerProgram(config).map(_ => ExitCode.Success)
     }
 
@@ -123,7 +152,9 @@ object Main extends CommandIOApp(name = "worker", header = "worker binary") {
         workingDirectory = config.workingDir,
         wtid = id,
         port = config.port + id,
-        ctx = new ProductionWorkerCtx {}
+        ctx = new ProductionWorkerCtx {},
+        replicatorLocalPort = config.replicatorLocalPort,
+        replicatorRemotePort = config.port - 1
       ) { worker =>
         for {
           _ <- worker.waitForComplete
