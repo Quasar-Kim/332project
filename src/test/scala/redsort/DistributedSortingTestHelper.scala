@@ -43,7 +43,8 @@ final case class TestConfig(
       outputDir = workerDir / "output",
       workingDir = None,
       threads = numWorkerThreads,
-      port = workerBasePort + 10 * mid
+      port = workerBasePort + 10 * mid,
+      replicatorLocalPort = workerBasePort + 1000 + 10 * mid
     )
   }
 }

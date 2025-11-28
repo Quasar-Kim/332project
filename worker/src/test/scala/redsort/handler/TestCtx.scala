@@ -27,3 +27,6 @@ class WorkerTestCtx(ref: Ref[IO, Map[String, Array[Byte]]])
     with ProductionSchedulerRpcClient
     with FakeNetInfo
     with ProductionReplicatorLocalRpcClient
+    with ProductionReplicatorLocalRpcServer
+    with ProductionReplicatorRemoteRpcClient
+    with ProductionReplicatorRemoteRpcServer
