@@ -19,6 +19,7 @@ import org.log4s._
 import redsort.jobs.SourceLogger
 import scala.redsort.jobs.worker.handler.SyncJobHandler
 import java.nio.file.FileAlreadyExistsException
+import redsort.jobs.replicator.Replicator
 
 trait Worker {
   def waitForComplete: IO[Unit]
@@ -35,6 +36,8 @@ object Worker {
       wtid: Int,
       port: Int,
       ctx: WorkerCtx,
+      replicatorLocalPort: Int,
+      replicatorRemotePort: Int,
       workingDirectory: Option[Path] = None
   )(program: Worker => IO[Unit]): IO[Unit] =
     for {
@@ -56,17 +59,22 @@ object Worker {
         )
 
       // start RPC server on the background
-      serverFiber = WorkerServerFiber
-        .start(
-          stateR = stateR,
-          port = port,
-          handlers = handlerMap,
-          dirs = dirs,
-          ctx = ctx,
-          logger = logger,
-          completed = completed
-        )
-        .useForever
+      serverFiber = ctx
+        .replicatorLocalRpcClient(new NetAddr("127.0.0.1", replicatorLocalPort))
+        .use { replicatorClient =>
+          WorkerServerFiber
+            .start(
+              stateR = stateR,
+              port = port,
+              handlers = handlerMap,
+              dirs = dirs,
+              ctx = ctx,
+              logger = logger,
+              completed = completed,
+              replicatorClient = replicatorClient
+            )
+            .useForever
+        }
 
       worker = new Worker {
         override def waitForComplete: IO[Unit] =
@@ -76,8 +84,20 @@ object Worker {
       mainFiber = ctx
         .schedulerRpcClient(masterAddr)
         .use(schedulerClient =>
-          registerWorkerToScheduler(schedulerClient, stateR, wtid, port, dirs, ctx)
-            .flatMap(_ => program(worker))
+          for {
+            _ <- registerWorkerToScheduler(schedulerClient, stateR, wtid, port, dirs, ctx)
+            replicatorIO = IO.whenA(wtid == 0)(
+              startReplicator(
+                stateR = stateR,
+                ctx = ctx,
+                dirs = dirs,
+                localPort = replicatorLocalPort,
+                remotePort = replicatorRemotePort
+              )
+            )
+            programIO = program(worker)
+            _ <- programIO.race(replicatorIO)
+          } yield ()
         )
 
       _ <- logger.info(s"worker (port=$port, wtid=$wtid) started, waiting for scheduler server...")
@@ -132,6 +152,24 @@ object Worker {
           .focus(_.replicatorAddrs)
           .replace(schedulerHello.replicatorAddrs.view.mapValues(NetAddr.fromMsg(_)).toMap)
       }
+    } yield ()
+
+  def startReplicator(
+      stateR: Ref[IO, SharedState],
+      ctx: WorkerCtx,
+      dirs: Directories,
+      localPort: Int,
+      remotePort: Int
+  ): IO[Unit] =
+    for {
+      state <- stateR.get
+      _ <- Replicator.start(
+        replicatorAddrs = state.replicatorAddrs,
+        ctx = ctx,
+        dirs = dirs,
+        localPort = localPort,
+        remotePort = remotePort
+      )
     } yield ()
 
   def getStorageInfo(dirs: Directories, ctx: FileStorage): IO[LocalStorageInfo] =

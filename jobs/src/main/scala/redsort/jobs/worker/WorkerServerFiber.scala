@@ -62,12 +62,20 @@ object WorkerServerFiber {
       dirs: Directories,
       ctx: WorkerCtx,
       logger: SourceLogger,
-      completed: Deferred[IO, Unit]
+      completed: Deferred[IO, Unit],
+      replicatorClient: ReplicatorLocalServiceFs2Grpc[IO, Metadata]
   ): Resource[IO, Server] =
     for {
       _ <- logger.debug("worker RPC server started").toResource
       jobRunner <- JobRunner
-        .init(handlers = handlers, dirs = dirs, ctx = ctx, logger = logger)
+        .init(
+          handlers = handlers,
+          dirs = dirs,
+          ctx = ctx,
+          logger = logger,
+          replicatorClient = replicatorClient,
+          stateR = stateR
+        )
         .toResource
       server <- ctx
         .workerRpcServer(

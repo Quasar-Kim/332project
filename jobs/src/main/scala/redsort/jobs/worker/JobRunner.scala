@@ -16,6 +16,8 @@ import com.google.protobuf.ByteString
 import redsort.jobs.Unreachable
 import redsort.jobs.SourceLogger
 import monocle.syntax.all._
+import io.grpc.Metadata
+import redsort.jobs.workers.SharedState
 
 trait JobRunner {
   def addHandler(entry: Tuple2[String, JobHandler]): IO[JobRunner]
@@ -30,11 +32,13 @@ object JobRunner {
       handlers: Map[String, JobHandler],
       dirs: Directories,
       ctx: FileStorage,
-      logger: SourceLogger
+      logger: SourceLogger,
+      replicatorClient: ReplicatorLocalServiceFs2Grpc[IO, Metadata],
+      stateR: Ref[IO, SharedState]
   ): IO[JobRunner] =
     IO.pure(new JobRunner {
       override def addHandler(entry: (String, JobHandler)): IO[JobRunner] =
-        JobRunner(handlers + entry, dirs, ctx, logger)
+        JobRunner(handlers + entry, dirs, ctx, logger, replicatorClient, stateR)
 
       override def runJob(spec: JobSpecMsg): IO[JobResult] =
         runJobInner(spec).handleErrorWith {
@@ -78,9 +82,30 @@ object JobRunner {
           )
         }
 
-      // later this method will replicate input files
-      def prepareInputs(inputs: Seq[FileEntry]): IO[Seq[Path]] =
-        IO.pure(fileEntriesToPaths(inputs))
+      def prepareInputs(inputs: Seq[FileEntry]): IO[Seq[Path]] = {
+        for {
+          mid <- stateR.get.map(s => s.wid.get.mid)
+          _ <- pullMissingFiles(inputs, mid)
+        } yield fileEntriesToPaths(inputs)
+      }
+
+      def pullMissingFiles(inputs: Seq[FileEntry], mid: Int): IO[Unit] =
+        inputs
+          .filter(!_.replicas.contains(mid))
+          .traverse { entry =>
+            val sources = entry.replicas.filter(_ != mid)
+            tryPull(entry, sources)
+          }
+          .map(_ => IO.unit)
+
+      def tryPull(entry: FileEntry, sources: Seq[Mid]): IO[Unit] = {
+        // TODO: treat sources.length == 0 as iput replication failure
+        val request = new PullRequest(path = entry.path, src = sources.head)
+        replicatorClient.pull(request, new Metadata).attempt.flatMap {
+          case Left(err) => tryPull(entry, sources.tail)
+          case Right(_)  => IO.unit
+        }
+      }
 
       def prepareOuptputs(outputs: Seq[FileEntry]): IO[Seq[Path]] =
         IO.pure(fileEntriesToPaths(outputs))
@@ -113,10 +138,12 @@ object JobRunner {
       handlers: Map[String, JobHandler],
       dirs: Directories,
       ctx: FileStorage,
-      logger: SourceLogger
+      logger: SourceLogger,
+      replicatorClient: ReplicatorLocalServiceFs2Grpc[IO, Metadata],
+      stateR: Ref[IO, SharedState]
   ): IO[JobRunner] =
     for {
       _ <- Directories.ensureDirs(dirs, ctx)
-      jobRunner <- JobRunner(handlers, dirs, ctx, logger)
+      jobRunner <- JobRunner(handlers, dirs, ctx, logger, replicatorClient, stateR)
     } yield jobRunner
 }

@@ -33,6 +33,10 @@ import com.google.protobuf.any
 import redsort.jobs.worker.Directories
 import redsort.jobs.messages._
 import com.google.protobuf.ByteString
+import redsort.jobs.context.impl.ProductionReplicatorLocalRpcServer
+import redsort.jobs.context.impl.ProductionReplicatorRemoteRpcClient
+import redsort.jobs.context.impl.ProductionReplicatorRemoteRpcServer
+import redsort.jobs.Common.FileEntry
 
 trait FakeNetInfo extends NetInfo {
   override def getIP: IO[String] =
@@ -52,6 +56,9 @@ class WorkerTestCtx(ref: Ref[IO, Map[String, Array[Byte]]])
     with ProductionSchedulerRpcClient
     with FakeNetInfo
     with ProductionReplicatorLocalRpcClient
+    with ProductionReplicatorLocalRpcServer
+    with ProductionReplicatorRemoteRpcClient
+    with ProductionReplicatorRemoteRpcServer
 
 object NoopJobHandler extends JobHandler {
   override def apply(
@@ -94,7 +101,7 @@ class WorkerSchedulerIntegrationSpec extends AsyncFunSpec with BeforeAndAfterEac
     def integrationTest(
         logName: String,
         handlers: Map[String, JobHandler]
-    )(body: (Scheduler, Worker) => IO[Unit]): IO[Unit] =
+    )(body: (Scheduler, Worker, WorkerTestCtx) => IO[Unit]): IO[Unit] =
       fileLogger(logName)
         .use { _ =>
           // run scheduler
@@ -106,6 +113,7 @@ class WorkerSchedulerIntegrationSpec extends AsyncFunSpec with BeforeAndAfterEac
           ) { scheduler =>
             for {
               fs <- IO.ref[Map[String, Array[Byte]]](Map())
+              ctx = new WorkerTestCtx(fs)
               _ <- Worker(
                 handlerMap = handlers,
                 masterAddr = new NetAddr("127.0.0.1", 5000 + portOffset),
@@ -113,9 +121,11 @@ class WorkerSchedulerIntegrationSpec extends AsyncFunSpec with BeforeAndAfterEac
                 outputDirectory = Path("/output"),
                 wtid = 0,
                 port = 6000 + portOffset,
-                ctx = new WorkerTestCtx(fs)
+                ctx = ctx,
+                replicatorLocalPort = 6050 + portOffset,
+                replicatorRemotePort = 6070 + portOffset
               ) { worker =>
-                body(scheduler, worker)
+                body(scheduler, worker, ctx)
               }
             } yield ()
           }
@@ -126,7 +136,7 @@ class WorkerSchedulerIntegrationSpec extends AsyncFunSpec with BeforeAndAfterEac
   test("worker registration", NetworkTest) {
     val f = fixture(0)
 
-    f.integrationTest("worker-registratiion", Map()) { case (scheduler, worker) =>
+    f.integrationTest("worker-registratiion", Map()) { case (scheduler, worker, _) =>
       scheduler.waitInit.void
     }
   }
@@ -142,7 +152,7 @@ class WorkerSchedulerIntegrationSpec extends AsyncFunSpec with BeforeAndAfterEac
       outputs = Seq()
     )
 
-    f.integrationTest("noop-job-execution-no-sync", handlers) { case (scheduler, worker) =>
+    f.integrationTest("noop-job-execution-no-sync", handlers) { case (scheduler, worker, _) =>
       for {
         _ <- scheduler.waitInit
 
@@ -166,7 +176,7 @@ class WorkerSchedulerIntegrationSpec extends AsyncFunSpec with BeforeAndAfterEac
       outputs = Seq()
     )
 
-    f.integrationTest("noop-job-execution", handlers) { case (scheduler, worker) =>
+    f.integrationTest("noop-job-execution", handlers) { case (scheduler, worker, _) =>
       for {
         _ <- scheduler.waitInit
         result <- scheduler.runJobs(Seq(jobSpec))
@@ -190,7 +200,7 @@ class WorkerSchedulerIntegrationSpec extends AsyncFunSpec with BeforeAndAfterEac
       outputs = Seq()
     )
 
-    f.integrationTest("job-with-name", handlers) { case (scheduler, worker) =>
+    f.integrationTest("job-with-name", handlers) { case (scheduler, worker, _) =>
       for {
         _ <- scheduler.waitInit
 
@@ -207,7 +217,7 @@ class WorkerSchedulerIntegrationSpec extends AsyncFunSpec with BeforeAndAfterEac
   test("completion", NetworkTest) {
     val f = fixture(4)
 
-    f.integrationTest("completion", Map()) { case (scheduler, worker) =>
+    f.integrationTest("completion", Map()) { case (scheduler, worker, _) =>
       for {
         _ <- scheduler.waitInit
         _ <- (
@@ -229,7 +239,7 @@ class WorkerSchedulerIntegrationSpec extends AsyncFunSpec with BeforeAndAfterEac
       outputs = Seq()
     )
 
-    f.integrationTest("failing-job-execution", handlers) { case (scheduler, worker) =>
+    f.integrationTest("failing-job-execution", handlers) { case (scheduler, worker, _) =>
       for {
         _ <- scheduler.waitInit
         result <- scheduler.runJobs(Seq(jobSpec)).attempt
