@@ -50,7 +50,9 @@ object ReplicatorLocalService {
         // save stream into local path
         val localPath = Directories.resolvePath(dirs, Path(readRequest.path))
         for {
+          _ <- logger.debug(s"pulling file ${pullRequest.path} from machine ${pullRequest.src}")
           _ <- ctx.save(localPath.toString, stream)
+          _ <- logger.debug(s"pulled ${pullRequest.path}")
         } yield new ReplicationResult(
           success = true,
           error = None,
