@@ -241,6 +241,7 @@ object SchedulerFiber {
                 for {
                   _ <- logger.info("all jobs completed")
                   updatedState <- updateFileEntries(updatedState)
+                  _ <- stateR.set(updatedState)
                   _ <- mainFiberQueue.offer(
                     new MainFiberEvents.JobCompleted(
                       jobResults(updatedState.schedulerFiber.workers),
