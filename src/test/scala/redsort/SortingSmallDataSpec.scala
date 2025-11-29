@@ -17,6 +17,7 @@ import org.scalatest.funsuite.AsyncFunSuite
 import fs2.io.file.Path
 import redsort.jobs.Common.NetAddr
 import redsort.master.CmdParser.numMachines
+import redsort.master.CmdParser.outFileSize
 
 @Slow
 class SortingSmallDataSpec extends AsyncFunSuite with AsyncIOSpec {
@@ -67,16 +68,17 @@ class SortingSmallDataSpec extends AsyncFunSuite with AsyncIOSpec {
     }
   }
 
-  ignore("sorting-1x1-130MB") {
+  test("sorting-1x1-10MB-multi-output") {
     testSorting(
-      name = "sorting-1x1-130MB",
+      name = "sorting-1x1-10MB-multi-output",
       numMachines = 1,
       numInputDirs = 1,
       numFilesPerInputDir = 1,
-      recordsPerFile = 1300 * 1000, // 1.3MB(1300KB) records x 100 byte = 130MB
+      recordsPerFile = 100 * 1000, // 100KB * 100 = 10MB
       numWorkerThreads = 1,
       masterPort = 5300,
-      workerBasePort = 6301
+      workerBasePort = 6301,
+      outFileSize = 1 // 1MB
     ) { config =>
       (
         MasterMain

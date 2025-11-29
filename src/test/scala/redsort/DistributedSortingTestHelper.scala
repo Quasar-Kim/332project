@@ -29,7 +29,7 @@ final case class TestConfig(
     numWorkerThreads: Int,
     workerBasePort: Int,
     baseDir: Path,
-    outFileSize: Long = 128 * 1000 * 1000
+    outFileSize: Long
 ) {
   def masterArgs: MasterArgs =
     new MasterArgs(
@@ -72,7 +72,8 @@ object DistributedSortingTestHelper {
       recordsPerFile: Int,
       numWorkerThreads: Int,
       masterPort: Int,
-      workerBasePort: Int
+      workerBasePort: Int,
+      outFileSize: Long = 128 // 128MB
   )(body: TestConfig => IO[Seq[Int]]): IO[Unit] =
     fileLogger(name).use { logger =>
       for {
@@ -87,7 +88,8 @@ object DistributedSortingTestHelper {
           masterPort = masterPort,
           numWorkerThreads = numWorkerThreads,
           workerBasePort = workerBasePort,
-          baseDir = baseDir
+          baseDir = baseDir,
+          outFileSize = outFileSize
         )
 
         // prepare, run, then validate.
