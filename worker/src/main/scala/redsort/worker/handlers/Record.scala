@@ -21,12 +21,6 @@ object Record {
     0
   }
 
-  def compareByteUnsigned(x: Byte, y: Byte): Int = {
-    val unsignedIntX = if (x < 0) x.toInt + 256 else x.toInt
-    val unsignedIntY = if (y < 0) y.toInt + 256 else y.toInt
-    unsignedIntX - unsignedIntY
-  }
-
   implicit object RecordOrder extends Order[Record] {
     def compare(x: Record, y: Record): Int =
       compareKeys(x, y)

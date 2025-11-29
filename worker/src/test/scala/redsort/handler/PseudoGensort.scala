@@ -1,7 +1,9 @@
 package redsort.worker.gensort
 
-import java.nio.charset.StandardCharsets
 import scala.util.Random
+import redsort.worker.handlers.Record
+import redsort.worker.handlers.Record
+import cats.syntax.all._
 
 object gensort {
   private val RECORD_SIZE = 100
@@ -10,20 +12,17 @@ object gensort {
   private val CR_BYTE = '\r'.toByte
   private val LF_BYTE = '\n'.toByte
 
-  def randomString(length: Int): String = {
-    (1 to length).map { _ => (33 + Random.nextInt(126 - 33 + 1)).toChar }.mkString
+  def randomBytes(length: Int): Array[Byte] = {
+    Array.fill(length)((scala.util.Random.nextInt(256) - 128).toByte)
   }
 
   // format: [KEY 10B] [SPACE 1B] [VALUE 87B] [CRLF 2B]
   def generate(recordCount: Int): Array[Byte] = {
-    val sb = new StringBuilder()
-    for (_ <- 0 until recordCount) {
-      sb.append(randomString(10))
-      sb.append(" ")
-      sb.append(randomString(87))
-      sb.append("\r\n")
+    (0 until recordCount).foldLeft(Array.empty[Byte]) { case (acc, _) =>
+      val record =
+        randomBytes(10).appended(' '.toByte) ++ randomBytes(87) ++ Array('\r'.toByte, '\n'.toByte)
+      acc ++ record
     }
-    sb.toString().getBytes(StandardCharsets.US_ASCII)
   }
 
   def validate(data: Array[Byte]): Boolean = {
@@ -31,9 +30,9 @@ object gensort {
     for (i <- 0 until recordCount - 1) {
       val offset1 = i * RECORD_SIZE
       val offset2 = (i + 1) * RECORD_SIZE
-      val key1 = new String(data, offset1, KEY_SIZE, StandardCharsets.US_ASCII)
-      val key2 = new String(data, offset2, KEY_SIZE, StandardCharsets.US_ASCII)
-      if (key1 > key2) {
+      val record1 = new Record(data.slice(offset1, offset1 + RECORD_SIZE))
+      val record2 = new Record(data.slice(offset2, offset2 + RECORD_SIZE))
+      if (record1 > record2) {
         return false
       }
     }
