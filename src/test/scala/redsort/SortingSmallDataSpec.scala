@@ -55,6 +55,30 @@ class SortingSmallDataSpec extends AsyncFunSuite with AsyncIOSpec {
     }
   }
 
+  test("sorting-1x1-10x100-10kb") {
+    testSorting(
+      name = "sorting-1x1-1x1-10kb",
+      numMachines = 1,
+      numInputDirs = 1,
+      numFilesPerInputDir = 1,
+      recordsPerFile = 100,
+      numWorkerThreads = 1,
+      masterPort = masterPortBase.getNext,
+      workerBasePort = workerPortBase.getNext
+    ) { config =>
+      (
+        MasterMain
+          .startScheduler(config.masterArgs),
+        (0 until config.numMachines)
+          .map(mid => WorkerMain.workerProgram(config.workerArgs(mid)))
+          .toList
+          .parSequence
+      ).parMapN((workerAddrs, _) =>
+        DistributedSortingTestHelper.workerAddrsToMachineOrder(workerAddrs)
+      )
+    }
+  }
+
   test("sorting-1x3-1x1-10kb") {
     testSorting(
       name = "sorting-1x3-1x1-10kb",
@@ -135,6 +159,54 @@ class SortingSmallDataSpec extends AsyncFunSuite with AsyncIOSpec {
       numFilesPerInputDir = 1,
       recordsPerFile = 100,
       numWorkerThreads = 3,
+      masterPort = masterPortBase.getNext,
+      workerBasePort = workerPortBase.getNext
+    ) { config =>
+      (
+        MasterMain
+          .startScheduler(config.masterArgs),
+        (0 until config.numMachines)
+          .map(mid => WorkerMain.workerProgram(config.workerArgs(mid)))
+          .toList
+          .parSequence
+      ).parMapN((workerAddrs, _) =>
+        DistributedSortingTestHelper.workerAddrsToMachineOrder(workerAddrs)
+      )
+    }
+  }
+
+  test("sorting-10x1-1x1-10kb") {
+    testSorting(
+      name = "sorting-10x1-1x1-10kb",
+      numMachines = 10,
+      numInputDirs = 1,
+      numFilesPerInputDir = 1,
+      recordsPerFile = 100,
+      numWorkerThreads = 1,
+      masterPort = masterPortBase.getNext,
+      workerBasePort = workerPortBase.getNext
+    ) { config =>
+      (
+        MasterMain
+          .startScheduler(config.masterArgs),
+        (0 until config.numMachines)
+          .map(mid => WorkerMain.workerProgram(config.workerArgs(mid)))
+          .toList
+          .parSequence
+      ).parMapN((workerAddrs, _) =>
+        DistributedSortingTestHelper.workerAddrsToMachineOrder(workerAddrs)
+      )
+    }
+  }
+
+  test("sorting-1x10-1x1-10kb") {
+    testSorting(
+      name = "sorting-1x10-1x1-10kb",
+      numMachines = 1,
+      numInputDirs = 1,
+      numFilesPerInputDir = 1,
+      recordsPerFile = 100,
+      numWorkerThreads = 10,
       masterPort = masterPortBase.getNext,
       workerBasePort = workerPortBase.getNext
     ) { config =>
