@@ -105,6 +105,51 @@ class MergeJobHandlerSpec extends AsyncFlatSpec with AsyncIOSpec with Matchers {
     }
   }
 
+  it should "handle empty input" in {
+    val f = fixture
+
+    f.withCtx { ctx =>
+      for {
+        _ <- (new MergeJobHandler).apply(
+          args = Seq.empty,
+          inputs = Seq.empty,
+          outputs = Seq.empty,
+          ctx = ctx,
+          d = null
+        )
+      } yield ()
+    }
+  }
+
+  it should "handle only one input file" in {
+    val f = fixture
+    val inputData = gensort.generate(100)
+
+    f.withCtx { ctx =>
+      for {
+        // prepare input file by sorting input files
+        _ <- f.prepareSortedFile(Path("/input/a"), inputData, ctx)
+
+        _ <- (new MergeJobHandler).apply(
+          args = Seq(),
+          inputs = Seq(
+            Path("/input/a")
+          ),
+          outputs = Seq(
+            Path("/output/b")
+          ),
+          ctx = ctx,
+          d = null
+        )
+
+        contents <- ctx.readAll("/output/b")
+        expectedContents <- ctx.readAll("/input/a")
+      } yield {
+        ByteString.copyFrom(contents) shouldBe ByteString.copyFrom(expectedContents)
+      }
+    }
+  }
+
   // regression: https://github.com/Quasar-Kim/332project/issues/34
   it should "merge two files with sizes 5500 and 4500" in {
     val f = fixture

@@ -34,32 +34,26 @@ class MergeJobHandler extends JobHandler {
       ctx: FileStorage,
       d: Directories
   ): IO[Option[Array[Byte]]] = {
-    for {
-      _ <- assertIO(inputs.length >= 2, "at least two inputs are required")
-      _ <- assertIO(outputs.length >= 1, "at least one output is required")
+    // create stream for each input files
+    val inputStreams = inputs.map { path =>
+      ctx.read(path.toString).chunkN(RECORD_SIZE).map(chunk => new Record(chunk.toArray))
+    }
 
-      // streams of input files, each record containing 100 byte record.
-      inputStreams = inputs.map { path =>
-        ctx.read(path.toString).chunkN(RECORD_SIZE).map(chunk => new Record(chunk.toArray))
+    // merge input stream into one stream
+    val mergedStream = sortedMerge(inputStreams)
+
+    // write contents of merged stream into multiple outputs, grouping contents
+    // by max size.
+    val writeStream = mergedStream
+      .map(record => Chunk.array(record.buf))
+      .chunkN(RECORDS_PER_FILE)
+      .zipWithIndex
+      .evalMap { case (chunk, index) =>
+        val ouputPath = outputs(index.toInt)
+        val stream = Stream.chunk(chunk)
+        ctx.save(ouputPath.toString, stream.unchunks)
       }
-
-      // merge input stream into one stream
-      mergedStream = sortedMerge(inputStreams)
-
-      // write contents of merged stream into multiple outputs, grouping contents
-      // by max size.
-      writeStream = mergedStream
-        .map(record => Chunk.array(record.buf))
-        .chunkN(RECORDS_PER_FILE)
-        .zipWithIndex
-        .evalMap { case (chunk, index) =>
-          val ouputPath = outputs(index.toInt)
-          val stream = Stream.chunk(chunk)
-          ctx.save(ouputPath.toString, stream.unchunks)
-        }
-
-      _ <- writeStream.compile.drain
-    } yield None
+    writeStream.compile.drain.map(_ => None)
   }
 
   /** Merge sorted streams into one sorted stream by combining streams in balanced binary tree
