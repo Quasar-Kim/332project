@@ -145,7 +145,7 @@ class MergeJobHandlerSpec extends AsyncFlatSpec with AsyncIOSpec with Matchers {
         contents <- ctx.readAll("/output/b")
         expectedContents <- ctx.readAll("/input/a")
       } yield {
-        ByteString.copyFrom(contents) shouldBe ByteString.copyFrom(expectedContents)
+        contents shouldBe expectedContents
       }
     }
   }

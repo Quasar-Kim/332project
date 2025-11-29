@@ -10,22 +10,10 @@ import redsort.jobs.context.interface._
 import redsort.jobs.worker._
 import java.nio.ByteBuffer
 import com.google.protobuf.ByteString
+import redsort.worker.handlers.Record
 
 class MergeJobHandler extends JobHandler {
-
-  private val MAX_FILE_SIZE = 128 * 1000 * 1000 // 128 MB
-  private val RECORD_SIZE = 100 // 100 bytes
-  private val RECORDS_PER_FILE = MAX_FILE_SIZE / RECORD_SIZE
-
-  case class Record(buf: Array[Byte]) {
-    def key: ByteBuffer = ByteBuffer.wrap(buf.slice(0, 10))
-    def value: ByteBuffer = ByteBuffer.wrap(buf.slice(10, 90))
-  }
-
-  implicit object RecordOrder extends Order[Record] {
-    def compare(x: Record, y: Record): Int =
-      x.key.compareTo(y.key)
-  }
+  import MergeJobHandler._
 
   override def apply(
       args: Seq[com.google.protobuf.any.Any],
@@ -81,4 +69,10 @@ class MergeJobHandler extends JobHandler {
       }
     }
   }
+}
+
+object MergeJobHandler {
+  private val MAX_FILE_SIZE = 128 * 1000 * 1000 // 128 MB
+  private val RECORD_SIZE = 100 // 100 bytes
+  private val RECORDS_PER_FILE = MAX_FILE_SIZE / RECORD_SIZE
 }
