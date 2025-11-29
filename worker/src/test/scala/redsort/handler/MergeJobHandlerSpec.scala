@@ -18,6 +18,8 @@ import redsort.jobs.context.impl._
 
 import redsort.worker.testctx._
 import com.google.protobuf.ByteString
+import redsort.jobs.messages.LongArg
+import com.google.protobuf.any
 
 class MergeJobHandlerSpec extends AsyncFlatSpec with AsyncIOSpec with Matchers {
   def fixture = new {
@@ -34,7 +36,7 @@ class MergeJobHandlerSpec extends AsyncFlatSpec with AsyncIOSpec with Matchers {
       for {
         _ <- ctx.writeAll(tmpPath.toString, data)
         _ <- (new SortJobHandler).apply(
-          args = Seq.empty,
+          args = Seq(any.Any.pack(new LongArg(128 * 1000 * 1000))),
           inputs = Seq(tmpPath),
           outputs = Seq(path),
           ctx = ctx,
@@ -67,21 +69,21 @@ class MergeJobHandlerSpec extends AsyncFlatSpec with AsyncIOSpec with Matchers {
         _ <- ctx.writeAll(sortinputStr2, input2Data)
 
         _ <- sorter.apply(
-          args = Seq.empty,
+          args = Seq(any.Any.pack(new LongArg(128 * 1000 * 1000))),
           inputs = Seq(Path(sortinputStr)),
           outputs = Seq(Path(sortoutputStr)),
           ctx = ctx,
           d = dummyDirs
         )
         _ <- sorter.apply(
-          args = Seq.empty,
+          args = Seq(any.Any.pack(new LongArg(128 * 1000 * 1000))),
           inputs = Seq(Path(sortinputStr2)),
           outputs = Seq(Path(sortoutputStr2)),
           ctx = ctx,
           d = dummyDirs
         )
         _ <- merger.apply(
-          args = Seq.empty,
+          args = Seq(any.Any.pack(new LongArg(128 * 1000 * 1000))),
           inputs = Seq(Path(sortoutputStr), Path(sortoutputStr2)),
           outputs = Seq(Path(mergedoutputStr)),
           ctx = ctx,
@@ -111,7 +113,7 @@ class MergeJobHandlerSpec extends AsyncFlatSpec with AsyncIOSpec with Matchers {
     f.withCtx { ctx =>
       for {
         _ <- (new MergeJobHandler).apply(
-          args = Seq.empty,
+          args = Seq(any.Any.pack(new LongArg(128 * 1000 * 1000))),
           inputs = Seq.empty,
           outputs = Seq.empty,
           ctx = ctx,
@@ -131,7 +133,7 @@ class MergeJobHandlerSpec extends AsyncFlatSpec with AsyncIOSpec with Matchers {
         _ <- f.prepareSortedFile(Path("/input/a"), inputData, ctx)
 
         _ <- (new MergeJobHandler).apply(
-          args = Seq(),
+          args = Seq(any.Any.pack(new LongArg(128 * 1000 * 1000))),
           inputs = Seq(
             Path("/input/a")
           ),
@@ -145,6 +147,39 @@ class MergeJobHandlerSpec extends AsyncFlatSpec with AsyncIOSpec with Matchers {
         contents <- ctx.readAll("/output/b")
         expectedContents <- ctx.readAll("/input/a")
       } yield {
+        contents shouldBe expectedContents
+      }
+    }
+  }
+
+  it should "output files with max size passed as argument" in {
+    val f = fixture
+    val inputData = gensort.generate(100) // 10KB
+
+    f.withCtx { ctx =>
+      for {
+        _ <- f.prepareSortedFile(Path("/input/a"), inputData, ctx)
+
+        _ <- (new MergeJobHandler).apply(
+          args = Seq(
+            any.Any.pack(new LongArg(5000)) // 5KB
+          ),
+          inputs = Seq(
+            Path("/input/a")
+          ),
+          outputs = Seq(
+            Path("/output/b.0"),
+            Path("/output/b.1")
+          ),
+          ctx = ctx,
+          d = null
+        )
+
+        contentsZero <- ctx.readAll("/output/b.0")
+        contentsOne <- ctx.readAll("/output/b.1")
+        expectedContents <- ctx.readAll("/input/a")
+      } yield {
+        val contents = contentsZero.concat(contentsOne)
         contents shouldBe expectedContents
       }
     }
@@ -165,7 +200,9 @@ class MergeJobHandlerSpec extends AsyncFlatSpec with AsyncIOSpec with Matchers {
         _ <- f.prepareSortedFile(Path("/sorted"), mergedData, ctx)
 
         _ <- (new MergeJobHandler).apply(
-          args = Seq(),
+          args = Seq(
+            any.Any.pack(new LongArg(128 * 1000 * 1000)) // 128MB
+          ),
           inputs = Seq(
             Path("/input/a"),
             Path("/input/b")

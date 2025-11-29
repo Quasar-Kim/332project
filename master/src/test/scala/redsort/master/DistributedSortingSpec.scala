@@ -20,6 +20,8 @@ import redsort.jobs.messages.IntArg
 import redsort.jobs.Common.Mid
 import redsort.jobs.messages.BytesArg
 import monocle.syntax.all._
+import com.google.protobuf.any
+import redsort.jobs.messages.LongArg
 
 class DistributedSortingSpec
     extends AsyncFunSuite
@@ -369,7 +371,9 @@ class DistributedSortingSpec
     def jobSpec(inputs: Seq[FileEntry], outputs: Seq[FileEntry]) =
       new JobSpec(
         name = "merge",
-        args = Seq(),
+        args = Seq(
+          new LongArg(128 * 1024 * 1024)
+        ),
         inputs = inputs,
         outputs = outputs
       )

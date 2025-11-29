@@ -11,6 +11,7 @@ import com.google.protobuf.ByteString
 import redsort.jobs.scheduler.JobExecutionResult
 import org.log4s._
 import redsort.jobs.SourceLogger
+import redsort.jobs.messages.LongArg
 
 /** Configuration for `DistributedSorting`.
   *
@@ -214,7 +215,9 @@ object DistributedSorting {
         // create merge spec
         val spec = new JobSpec(
           name = "merge",
-          args = Seq(),
+          args = Seq(
+            new LongArg(outFileSize)
+          ),
           inputs = inputs,
           outputs = outputs
         )

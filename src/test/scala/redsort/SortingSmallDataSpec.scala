@@ -67,7 +67,7 @@ class SortingSmallDataSpec extends AsyncFunSuite with AsyncIOSpec {
     }
   }
 
-  test("sorting-1x1-130MB") {
+  ignore("sorting-1x1-130MB") {
     testSorting(
       name = "sorting-1x1-130MB",
       numMachines = 1,

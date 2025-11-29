@@ -28,13 +28,15 @@ final case class TestConfig(
     masterPort: Int,
     numWorkerThreads: Int,
     workerBasePort: Int,
-    baseDir: Path
+    baseDir: Path,
+    outFileSize: Long = 128 * 1000 * 1000
 ) {
   def masterArgs: MasterArgs =
     new MasterArgs(
       numMachines = numMachines,
       port = masterPort,
-      threads = numWorkerThreads
+      threads = numWorkerThreads,
+      outFileSize = outFileSize
     )
 
   def workerArgs(mid: Int): WorkerArgs = {

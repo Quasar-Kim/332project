@@ -16,13 +16,14 @@ import redsort.jobs.context.impl.ProductionNetInfo
 import redsort.jobs.Common.Mid
 import redsort.jobs.Common.NetAddr
 import redsort.jobs.Common.Wid
+import redsort.master.CmdParser.outFileSize
 
 // container of command line options
-final case class Args(numMachines: Int, port: Int, threads: Int)
+final case class Args(numMachines: Int, port: Int, threads: Int, outFileSize: Long)
 import redsort.jobs.SourceLogger
 object Args {
-  def apply(numMachiens: Int, port: Int, threads: Int) =
-    new Args(numMachiens, port, threads)
+  def apply(numMachiens: Int, port: Int, threads: Int, outFileSize: Long) =
+    new Args(numMachiens, port, threads, outFileSize: Long)
 }
 
 // command line options
@@ -38,7 +39,16 @@ object CmdParser {
       .option[Int]("threads", "number of worker threads per machine (default: 4)", metavar = "n")
       .withDefault(4)
 
-  val parser: Opts[Args] = (numMachines, port, threads).mapN(Args.apply)
+  val outFileSize: Opts[Long] =
+    Opts
+      .option[Long](
+        "out-file-size",
+        "max. output size of each output partition files, in MB (default: 128)",
+        metavar = "size"
+      )
+      .withDefault(128L)
+
+  val parser: Opts[Args] = (numMachines, port, threads, outFileSize).mapN(Args.apply)
 }
 
 // dependency injection
@@ -50,15 +60,21 @@ object Ctx
 
 object Main extends CommandIOApp(name = "master", header = "master binary") {
   override def main: Opts[IO[ExitCode]] =
-    CmdParser.parser.map { case args @ Args(_, _, _) =>
+    CmdParser.parser.map { case args @ Args(_, _, _, _) =>
       startScheduler(args).map(_ => ExitCode.Success)
     }
 
-  def startScheduler(args: Args): IO[Map[Wid, NetAddr]] =
+  def startScheduler(args: Args): IO[Map[Wid, NetAddr]] = {
+    val distributedSortingConfig = new DistributedSortingConfig(
+      outFileSize = args.outFileSize * 1000L * 1000L
+    )
+
     Scheduler(
       port = args.port,
       numMachines = args.numMachines,
       numWorkersPerMachine = args.threads,
       ctx = Ctx
-    )(DistributedSorting.run(DistributedSortingConfig.default))
+    )(DistributedSorting.run(distributedSortingConfig))
+  }
+
 }

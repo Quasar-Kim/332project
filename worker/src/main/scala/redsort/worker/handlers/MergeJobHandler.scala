@@ -11,6 +11,7 @@ import redsort.jobs.worker._
 import java.nio.ByteBuffer
 import com.google.protobuf.ByteString
 import redsort.worker.handlers.Record
+import redsort.jobs.messages.LongArg
 
 class MergeJobHandler extends JobHandler {
   import MergeJobHandler._
@@ -22,26 +23,38 @@ class MergeJobHandler extends JobHandler {
       ctx: FileStorage,
       d: Directories
   ): IO[Option[Array[Byte]]] = {
-    // create stream for each input files
-    val inputStreams = inputs.map { path =>
-      ctx.read(path.toString).chunkN(RECORD_SIZE).map(chunk => new Record(chunk.toArray))
-    }
 
-    // merge input stream into one stream
-    val mergedStream = sortedMerge(inputStreams)
+    for {
+      // first argument is max size of each output partition files
+      _ <- assertIO(args.length == 1, "output file size argument must be present")
+      outFileSize <- IO(args(0).unpack[LongArg].value)
+      _ <- assertIO(
+        outFileSize % RECORD_SIZE == 0,
+        "output file size must be divisible by record size (100)"
+      )
+      recordsPerFile = (outFileSize / RECORD_SIZE).toInt
 
-    // write contents of merged stream into multiple outputs, grouping contents
-    // by max size.
-    val writeStream = mergedStream
-      .map(record => Chunk.array(record.buf))
-      .chunkN(RECORDS_PER_FILE)
-      .zipWithIndex
-      .evalMap { case (chunk, index) =>
-        val ouputPath = outputs(index.toInt)
-        val stream = Stream.chunk(chunk)
-        ctx.save(ouputPath.toString, stream.unchunks)
+      // create stream for each input files
+      inputStreams = inputs.map { path =>
+        ctx.read(path.toString).chunkN(RECORD_SIZE).map(chunk => new Record(chunk.toArray))
       }
-    writeStream.compile.drain.map(_ => None)
+      // merge input stream into one stream
+      mergedStream = sortedMerge(inputStreams)
+
+      // write contents of merged stream into multiple outputs, grouping contents
+      // by max size.
+      writeStream = mergedStream
+        .map(record => Chunk.array(record.buf))
+        .chunkN(recordsPerFile)
+        .zipWithIndex
+        .evalMap { case (chunk, index) =>
+          val ouputPath = outputs(index.toInt)
+          val stream = Stream.chunk(chunk)
+          ctx.save(ouputPath.toString, stream.unchunks)
+        }
+
+      _ <- writeStream.compile.drain
+    } yield None
   }
 
   /** Merge sorted streams into one sorted stream by combining streams in balanced binary tree
@@ -72,7 +85,5 @@ class MergeJobHandler extends JobHandler {
 }
 
 object MergeJobHandler {
-  private val MAX_FILE_SIZE = 128 * 1000 * 1000 // 128 MB
-  private val RECORD_SIZE = 100 // 100 bytes
-  private val RECORDS_PER_FILE = MAX_FILE_SIZE / RECORD_SIZE
+  val RECORD_SIZE = 100 // 100 bytes
 }
