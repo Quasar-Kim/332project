@@ -16,6 +16,8 @@ import redsort.worker.{Configuration => WorkerArgs}
 import redsort.worker.CmdParser.workingDir
 import redsort.jobs.Common.NetAddr
 import fs2.io.file.{Path => Fs2Path}
+import redsort.jobs.Common.Mid
+import redsort.jobs.Common.Wid
 
 final case class TestConfig(
     name: String,
@@ -238,4 +240,11 @@ object DistributedSortingTestHelper {
       }
     )
   }
+
+  def workerAddrsToMachineOrder(workerAddrs: Map[Wid, NetAddr]): Seq[Mid] =
+    workerAddrs
+      .filter { case (wid, _) => wid.wtid == 0 }
+      .toList
+      .sortBy { case (_, addr) => addr.port }
+      .map { case (wid, _) => wid.mid }
 }

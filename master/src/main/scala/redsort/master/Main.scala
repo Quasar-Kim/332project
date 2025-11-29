@@ -60,5 +60,5 @@ object Main extends CommandIOApp(name = "master", header = "master binary") {
       numMachines = args.numMachines,
       numWorkersPerMachine = args.threads,
       ctx = Ctx
-    )(DistributedSorting.run)
+    )(DistributedSorting.run(DistributedSortingConfig.default))
 }
