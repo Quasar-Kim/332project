@@ -16,6 +16,8 @@ import redsort.worker.{Configuration => WorkerArgs}
 import redsort.worker.CmdParser.workingDir
 import redsort.jobs.Common.NetAddr
 import fs2.io.file.{Path => Fs2Path}
+import redsort.jobs.Common.Mid
+import redsort.jobs.Common.Wid
 
 final case class TestConfig(
     name: String,
@@ -26,13 +28,15 @@ final case class TestConfig(
     masterPort: Int,
     numWorkerThreads: Int,
     workerBasePort: Int,
-    baseDir: Path
+    baseDir: Path,
+    outFileSize: Long
 ) {
   def masterArgs: MasterArgs =
     new MasterArgs(
       numMachines = numMachines,
       port = masterPort,
-      threads = numWorkerThreads
+      threads = numWorkerThreads,
+      outFileSize = outFileSize
     )
 
   def workerArgs(mid: Int): WorkerArgs = {
@@ -68,7 +72,8 @@ object DistributedSortingTestHelper {
       recordsPerFile: Int,
       numWorkerThreads: Int,
       masterPort: Int,
-      workerBasePort: Int
+      workerBasePort: Int,
+      outFileSize: Long = 128 // 128MB
   )(body: TestConfig => IO[Seq[Int]]): IO[Unit] =
     fileLogger(name).use { logger =>
       for {
@@ -83,7 +88,8 @@ object DistributedSortingTestHelper {
           masterPort = masterPort,
           numWorkerThreads = numWorkerThreads,
           workerBasePort = workerBasePort,
-          baseDir = baseDir
+          baseDir = baseDir,
+          outFileSize = outFileSize
         )
 
         // prepare, run, then validate.
@@ -238,4 +244,11 @@ object DistributedSortingTestHelper {
       }
     )
   }
+
+  def workerAddrsToMachineOrder(workerAddrs: Map[Wid, NetAddr]): Seq[Mid] =
+    workerAddrs
+      .filter { case (wid, _) => wid.wtid == 0 }
+      .toList
+      .sortBy { case (_, addr) => addr.port }
+      .map { case (wid, _) => wid.mid }
 }
