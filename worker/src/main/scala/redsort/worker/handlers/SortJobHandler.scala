@@ -52,6 +52,8 @@ class SortJobHandler extends JobHandler {
           Stream.emits(allRecords).flatMap(record => Stream.chunk(Chunk.array(record)))
         ctx.save(path.toString, fileStream)
       }
+
+      _ <- IO.println(s"${inputs(0).toString} -> ${outputs(0).toString}")
     } yield ()
 
     program.map(_ => None)

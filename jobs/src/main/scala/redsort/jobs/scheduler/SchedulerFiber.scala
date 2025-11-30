@@ -222,8 +222,7 @@ object SchedulerFiber {
                 case None => throw new Unreachable
               }
             })
-            _ <- IO(
-              logger.info(
+            _ <- logger.info(
                 s"$from completed job. pending: ${updatedState.schedulerFiber.workers(from).pendingJobs.length}, completed: ${updatedState.schedulerFiber.workers(from).completedJobs.length}"
               )
             )
@@ -418,7 +417,9 @@ object SchedulerFiber {
       case Some(entry) => Some(entry._1) // already registered, just return its wid
       case None        => {
         // new worker registration, try finding empty wid
-        val newEntryOption = workerStates.filter(_._1.wtid == hello.wtid).find { case (_, state) =>
+        val newEntryOption =
+          workerStates.filter(_._1.wtid == hello.wtid).toSeq.sortBy(_._1.mid).find {
+            case (_, state) =>
           !state.initialized
         }
         newEntryOption match {
