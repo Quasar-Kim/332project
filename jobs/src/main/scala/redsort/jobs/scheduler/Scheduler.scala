@@ -127,9 +127,6 @@ object Scheduler {
             .start(stateR, wid, rpcClientFiberQueues(wid), schedulerFiberQueue, ctx)
             .useForever
         }
-        // REMOVEME
-        // IO.raiseError(new RuntimeException("let's see how error is handled here"))
-        //   .delayBy(100.millis)
       ).parTupled
 
       // actual scheduler definition here, bound with arguments passed to apply().
