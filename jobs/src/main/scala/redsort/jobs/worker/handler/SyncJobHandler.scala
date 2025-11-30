@@ -36,9 +36,6 @@ object SyncJobHandler extends JobHandler {
           .toSet
       }
       filesToDelete <- IO.pure(localFiles &~ remoteFiles)
-      _ <- IO.println(
-        s"remote files: ${remoteFiles}\nlocal files: ${localFiles}\nwill delete: ${filesToDelete}\n\n"
-      )
       _ <- filesToDelete.toList.traverse(p => ctx.delete(p.toString))
 
       // output file is required to force sync job to be scheduled to desired machine
