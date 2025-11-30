@@ -66,20 +66,24 @@ class ReplicatorSpec extends AsyncFunSpec {
             )
 
             replicators = (
-              Replicator.start(
-                replicatorAddrs = replicatorAddrs,
-                ctx = ctxOne,
-                dirs = dirs,
-                localPort = replicatorAlocalPort,
-                remotePort = 3000 + portOffset
-              ),
-              Replicator.start(
-                replicatorAddrs = replicatorAddrs,
-                ctx = ctxTwo,
-                dirs = dirs,
-                localPort = replicatorBlocalPort,
-                remotePort = 3050 + portOffset
-              )
+              Replicator
+                .start(
+                  replicatorAddrs = replicatorAddrs,
+                  ctx = ctxOne,
+                  dirs = dirs,
+                  localPort = replicatorAlocalPort,
+                  remotePort = 3000 + portOffset
+                )
+                .onError(e => IO.println(s"replicator A raised error: $e")),
+              Replicator
+                .start(
+                  replicatorAddrs = replicatorAddrs,
+                  ctx = ctxTwo,
+                  dirs = dirs,
+                  localPort = replicatorBlocalPort,
+                  remotePort = 3050 + portOffset
+                )
+                .onError(e => IO.println(s"replicator B raised error: $e"))
             ).parTupled
 
             _ <- replicators.race(body(ctxOne, ctxTwo, clientA))

@@ -58,7 +58,28 @@ object Worker {
           workingDirectory = workDir
         )
 
-      // start RPC server on the background
+      // replicator service (only on wtid == 0)
+      replciatorFiber =
+        if (wtid == 0)
+          startReplicator(
+            stateR = stateR,
+            ctx = ctx,
+            dirs = dirs,
+            localPort = replicatorLocalPort,
+            remotePort = replicatorRemotePort
+          ).flatMap(_ => logger.error("replicator exited prematurely"))
+        else
+          IO.never[Unit]
+
+      // worker object passed to user program
+      worker = new Worker {
+        override def waitForComplete: IO[Unit] =
+          completed.get
+      }
+      // user program
+      programFiber = program(worker).flatMap(_ => logger.debug("user program exited"))
+
+      // RPC server fiber
       serverFiber = ctx
         .replicatorLocalRpcClient(new NetAddr("127.0.0.1", replicatorLocalPort))
         .use { replicatorClient =>
@@ -77,37 +98,71 @@ object Worker {
             .flatMap(_ => logger.error("server fiber exited prematurely"))
         }
 
-      worker = new Worker {
-        override def waitForComplete: IO[Unit] =
-          completed.get
+      _ <- ctx.schedulerRpcClient(masterAddr).use { schedulerClient =>
+        for {
+          // wait for registration
+          _ <- logger.info(
+            s"worker (port=$port, wtid=$wtid) started, waiting for scheduler server..."
+          )
+          _ <- registerWorkerToScheduler(schedulerClient, stateR, wtid, port, dirs, ctx)
+          wid <- stateR.get.map(s => s.wid.get)
+          _ <- logger.debug(s"${wid}: working directory ${workDir}")
+
+          // start fibers concurrently with user program
+          backgroundFiber = (serverFiber, replciatorFiber).parTupled
+          _ <- programFiber.race(backgroundFiber)
+        } yield ()
       }
 
-      mainFiber = ctx
-        .schedulerRpcClient(masterAddr)
-        .use(schedulerClient =>
-          for {
-            _ <- registerWorkerToScheduler(schedulerClient, stateR, wtid, port, dirs, ctx)
-            wid <- stateR.get.map(s => s.wid.get)
-            _ <- logger.debug(s"${wid}: working directory ${workDir}")
-            replicatorIO =
-              if (wtid == 0)
-                startReplicator(
-                  stateR = stateR,
-                  ctx = ctx,
-                  dirs = dirs,
-                  localPort = replicatorLocalPort,
-                  remotePort = replicatorRemotePort
-                )
-              else
-                IO.never[Unit]
-                  .flatMap(_ => logger.error("replicator exited prematurely"))
-            programIO = program(worker).flatMap(_ => logger.debug("user program exited"))
-            _ <- programIO.race(replicatorIO)
-          } yield ()
-        )
+      // start RPC server on the background
+      // serverFiber = ctx
+      //   .replicatorLocalRpcClient(new NetAddr("127.0.0.1", replicatorLocalPort))
+      //   .use { replicatorClient =>
+      //     WorkerServerFiber
+      //       .start(
+      //         stateR = stateR,
+      //         port = port,
+      //         handlers = handlerMap,
+      //         dirs = dirs,
+      //         ctx = ctx,
+      //         logger = logger,
+      //         completed = completed,
+      //         replicatorClient = replicatorClient
+      //       )
+      //       .useForever
+      //       .flatMap(_ => logger.error("server fiber exited prematurely"))
+      //   }
 
-      _ <- logger.info(s"worker (port=$port, wtid=$wtid) started, waiting for scheduler server...")
-      _ <- serverFiber.race(mainFiber)
+      // worker = new Worker {
+      //   override def waitForComplete: IO[Unit] =
+      //     completed.get
+      // }
+
+      // mainFiber = ctx
+      //   .schedulerRpcClient(masterAddr)
+      //   .use(schedulerClient =>
+      //     for {
+      //       _ <- registerWorkerToScheduler(schedulerClient, stateR, wtid, port, dirs, ctx)
+      //       wid <- stateR.get.map(s => s.wid.get)
+      //       _ <- logger.debug(s"${wid}: working directory ${workDir}")
+      //       replicatorIO =
+      //         if (wtid == 0)
+      //           startReplicator(
+      //             stateR = stateR,
+      //             ctx = ctx,
+      //             dirs = dirs,
+      //             localPort = replicatorLocalPort,
+      //             remotePort = replicatorRemotePort
+      //           )
+      //         else
+      //           IO.never[Unit]
+      //             .flatMap(_ => logger.error("replicator exited prematurely"))
+      //       programIO = program(worker).flatMap(_ => logger.debug("user program exited"))
+      //       _ <- programIO.race(replicatorIO)
+      //     } yield ()
+      //   )
+
+      // _ <- serverFiber.race(mainFiber)
       _ <- logger.info(s"worker (wtid: $wtid) done, running finalization")
       _ <- IO.whenA(wtid == 0)(finalize(dirs, ctx))
     } yield ()

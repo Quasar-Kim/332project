@@ -160,10 +160,14 @@ object Scheduler {
               case JobFailed(spec, result) =>
                 IO.raiseError[JobExecutionResult](
                   new RuntimeException(
-                    s"Job execution failed: kind= ${result.error.get.kind}, spec=$spec",
-                    result.error.get.inner match {
-                      case Some(inner) => JobSystemException.fromMsg(inner, source = "worker")
-                      case None        => null
+                    s"Job execution failed: error= ${result.error}, spec=$spec",
+                    result.error match {
+                      case Some(err) =>
+                        err.inner match {
+                          case Some(inner) => JobSystemException.fromMsg(inner, source = "worker")
+                          case None        => null
+                        }
+                      case None => null
                     }
                   )
                 )

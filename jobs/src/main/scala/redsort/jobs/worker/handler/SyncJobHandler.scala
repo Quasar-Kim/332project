@@ -11,12 +11,16 @@ import redsort.jobs.messages.FileEntryMsg
 import redsort.jobs.Common.FileEntry
 import scala.concurrent.duration._
 import redsort.jobs.Common.assertIO
+import org.log4s._
+import redsort.jobs.SourceLogger
 
 /** Synchornize local working directory entries with entries scheduler knows. This effectively
   * cleans up no longer required intermediate files. Also fetches missing files from remote
   * machines. (NOT IMPLEMENTED)
   */
 object SyncJobHandler extends JobHandler {
+  private[this] val logger = new SourceLogger(getLogger)
+
   override def apply(
       args: Seq[ProtobufAny],
       inputs: Seq[Path],
@@ -36,6 +40,7 @@ object SyncJobHandler extends JobHandler {
           .toSet
       }
       filesToDelete <- IO.pure(localFiles &~ remoteFiles)
+      _ <- logger.info(s"deleting files: ${filesToDelete}")
       _ <- filesToDelete.toList.traverse(p => ctx.delete(p.toString))
 
       // output file is required to force sync job to be scheduled to desired machine
