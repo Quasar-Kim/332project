@@ -16,8 +16,7 @@ import cats.effect.testing.scalatest.AsyncIOSpec
 import org.scalatest.funsuite.AsyncFunSuite
 import fs2.io.file.Path
 import redsort.jobs.Common.NetAddr
-import redsort.master.CmdParser.numMachines
-import redsort.master.CmdParser.outFileSize
+import scala.concurrent.duration._
 
 @Slow
 class SortingSmallDataSpec extends AsyncFunSuite with AsyncIOSpec {
@@ -88,6 +87,54 @@ class SortingSmallDataSpec extends AsyncFunSuite with AsyncIOSpec {
           .toList
           .parSequence
       ).parMapN((_, _) => Seq(0))
+    }
+  }
+
+  test("sorting-1x2-1kb") {
+    testSorting(
+      name = "sorting-1x2-1kb",
+      numMachines = 1,
+      numInputDirs = 1,
+      numFilesPerInputDir = 1,
+      recordsPerFile = 100,
+      numWorkerThreads = 2,
+      masterPort = 5400,
+      workerBasePort = 6401
+    ) { config =>
+      (
+        MasterMain
+          .startScheduler(config.masterArgs),
+        (0 until 1)
+          .map(mid => WorkerMain.workerProgram(config.workerArgs(mid)))
+          .toList
+          .parSequence
+      ).parMapN((workerAddrs, _) =>
+        DistributedSortingTestHelper.workerAddrsToMachineOrder(workerAddrs)
+      )
+    }
+  }
+
+  test("sorting-2x2-40MB") {
+    testSorting(
+      name = "sorting-2x2-40MB",
+      numMachines = 2,
+      numInputDirs = 2,
+      numFilesPerInputDir = 1,
+      recordsPerFile = 100 * 1000, // 100KB * 100 = 10MB
+      numWorkerThreads = 2,
+      masterPort = 5500,
+      workerBasePort = 6501
+    ) { config =>
+      (
+        MasterMain
+          .startScheduler(config.masterArgs),
+        (0 until 2)
+          .map(mid => IO.sleep(mid * 1.second) >> WorkerMain.workerProgram(config.workerArgs(mid)))
+          .toList
+          .parSequence
+      ).parMapN((workerAddrs, _) =>
+        DistributedSortingTestHelper.workerAddrsToMachineOrder(workerAddrs)
+      )
     }
   }
 }
