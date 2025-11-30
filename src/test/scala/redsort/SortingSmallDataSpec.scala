@@ -20,22 +20,24 @@ import scala.concurrent.duration._
 
 @Slow
 class SortingSmallDataSpec extends AsyncFunSuite with AsyncIOSpec {
+  val masterPortBase = new NextPort(5000)
+  val workerPortBase = new NextPort(6001)
 
-  test("sorting-1x1-1kb") {
+  test("sorting-1x1-1x1-1kb") {
     testSorting(
-      name = "sorting-1x1-1kb",
+      name = "sorting-1x1-1x1-1kb",
       numMachines = 1,
       numInputDirs = 1,
       numFilesPerInputDir = 1,
       recordsPerFile = 100,
       numWorkerThreads = 1,
-      masterPort = 5100,
-      workerBasePort = 6101
+      masterPort = masterPortBase.getNext,
+      workerBasePort = workerPortBase.getNext
     ) { config =>
       (
         MasterMain
           .startScheduler(config.masterArgs),
-        (0 until 1)
+        (0 until config.numMachines)
           .map(mid => WorkerMain.workerProgram(config.workerArgs(mid)))
           .toList
           .parSequence
@@ -51,13 +53,13 @@ class SortingSmallDataSpec extends AsyncFunSuite with AsyncIOSpec {
       numFilesPerInputDir = 1,
       recordsPerFile = 100,
       numWorkerThreads = 1,
-      masterPort = 5200,
-      workerBasePort = 6201
+      masterPort = masterPortBase.getNext,
+      workerBasePort = workerPortBase.getNext
     ) { config =>
       (
         MasterMain
           .startScheduler(config.masterArgs),
-        (0 until 2)
+        (0 until config.numMachines)
           .map(mid => WorkerMain.workerProgram(config.workerArgs(mid)))
           .toList
           .parSequence
@@ -75,14 +77,14 @@ class SortingSmallDataSpec extends AsyncFunSuite with AsyncIOSpec {
       numFilesPerInputDir = 1,
       recordsPerFile = 100 * 1000, // 100KB * 100 = 10MB
       numWorkerThreads = 1,
-      masterPort = 5300,
-      workerBasePort = 6301,
+      masterPort = masterPortBase.getNext,
+      workerBasePort = workerPortBase.getNext,
       outFileSize = 1 // 1MB
     ) { config =>
       (
         MasterMain
           .startScheduler(config.masterArgs),
-        (0 until 1)
+        (0 until config.numMachines)
           .map(mid => WorkerMain.workerProgram(config.workerArgs(mid)))
           .toList
           .parSequence
@@ -98,13 +100,13 @@ class SortingSmallDataSpec extends AsyncFunSuite with AsyncIOSpec {
       numFilesPerInputDir = 1,
       recordsPerFile = 100,
       numWorkerThreads = 2,
-      masterPort = 5400,
-      workerBasePort = 6401
+      masterPort = masterPortBase.getNext,
+      workerBasePort = workerPortBase.getNext
     ) { config =>
       (
         MasterMain
           .startScheduler(config.masterArgs),
-        (0 until 1)
+        (0 until config.numMachines)
           .map(mid => WorkerMain.workerProgram(config.workerArgs(mid)))
           .toList
           .parSequence
@@ -122,14 +124,38 @@ class SortingSmallDataSpec extends AsyncFunSuite with AsyncIOSpec {
       numFilesPerInputDir = 1,
       recordsPerFile = 100 * 1000, // 100KB * 100 = 10MB
       numWorkerThreads = 2,
-      masterPort = 5500,
-      workerBasePort = 6501
+      masterPort = masterPortBase.getNext,
+      workerBasePort = workerPortBase.getNext
     ) { config =>
       (
         MasterMain
           .startScheduler(config.masterArgs),
-        (0 until 2)
+        (0 until config.numMachines)
           .map(mid => IO.sleep(mid * 1.second) >> WorkerMain.workerProgram(config.workerArgs(mid)))
+          .toList
+          .parSequence
+      ).parMapN((workerAddrs, _) =>
+        DistributedSortingTestHelper.workerAddrsToMachineOrder(workerAddrs)
+      )
+    }
+  }
+
+  test("sorting-2x4-400MB") {
+    testSorting(
+      name = "sorting-2x4-400MB",
+      numMachines = 2,
+      numInputDirs = 2,
+      numFilesPerInputDir = 10,
+      recordsPerFile = 100 * 1000, // 100KB * 100 = 10MB
+      numWorkerThreads = 4,
+      masterPort = masterPortBase.getNext,
+      workerBasePort = workerPortBase.getNext
+    ) { config =>
+      (
+        MasterMain
+          .startScheduler(config.masterArgs),
+        (0 until config.numMachines)
+          .map(mid => IO.sleep(mid * 3.second) >> WorkerMain.workerProgram(config.workerArgs(mid)))
           .toList
           .parSequence
       ).parMapN((workerAddrs, _) =>

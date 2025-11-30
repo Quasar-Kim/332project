@@ -18,6 +18,7 @@ import redsort.jobs.Common.NetAddr
 import fs2.io.file.{Path => Fs2Path}
 import redsort.jobs.Common.Mid
 import redsort.jobs.Common.Wid
+import java.util.concurrent.atomic.AtomicInteger
 
 final case class TestConfig(
     name: String,
@@ -51,6 +52,11 @@ final case class TestConfig(
       replicatorLocalPort = workerBasePort + 1000 + 10 * mid
     )
   }
+}
+
+class NextPort(initialPort: Int) {
+  private var currentPort: AtomicInteger = new AtomicInteger(initialPort)
+  def getNext: Int = currentPort.addAndGet(100)
 }
 
 object DistributedSortingTestHelper {
