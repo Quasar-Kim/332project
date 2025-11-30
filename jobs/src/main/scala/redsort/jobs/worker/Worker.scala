@@ -113,9 +113,7 @@ object Worker {
     } yield ()
 
   def getWorkingDir(outputDirectory: Path): IO[Path] = {
-    for {
-      timestamp <- IO(LocalDateTime.now.format(DateTimeFormatter.ofPattern("YYYYMMdd_HHmmss")))
-    } yield outputDirectory / s"redsort-working-$timestamp"
+    IO.pure(outputDirectory / "redsort-working")
   }
 
   def registerWorkerToScheduler(
