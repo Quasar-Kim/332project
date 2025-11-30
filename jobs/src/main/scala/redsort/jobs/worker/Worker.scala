@@ -109,7 +109,7 @@ object Worker {
       _ <- logger.info(s"worker (port=$port, wtid=$wtid) started, waiting for scheduler server...")
       _ <- serverFiber.race(mainFiber)
       _ <- logger.info(s"worker (wtid: $wtid) done, running finalization")
-      _ <- finalize(dirs, ctx)
+      _ <- IO.whenA(wtid == 0)(finalize(dirs, ctx))
     } yield ()
 
   def getWorkingDir(outputDirectory: Path): IO[Path] = {
@@ -199,6 +199,6 @@ object Worker {
   def finalize(dirs: Directories, ctx: FileStorage): IO[Unit] =
     for {
       _ <- logger.debug("cleaning working directory")
-      _ <- ctx.delete(dirs.workingDirectory.toString)
+      _ <- ctx.deleteRecursively(dirs.workingDirectory.toString)
     } yield ()
 }
