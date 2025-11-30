@@ -17,6 +17,10 @@ import redsort.jobs.SourceLogger
 import org.log4s.getLogger
 import redsort.jobs.Common.NetAddr
 import com.monovore.decline.effect.CommandIOApp
+import ch.qos.logback.classic.util.ContextInitializer
+import ch.qos.logback.classic.LoggerContext
+import org.slf4j.LoggerFactory
+import org.slf4j.helpers.SubstituteLoggerFactory
 
 trait ProductionWorkerCtx
     extends WorkerCtx
@@ -37,7 +41,8 @@ final case class Configuration(
     workingDir: Option[Path],
     threads: Int,
     port: Int,
-    replicatorLocalPort: Int
+    replicatorLocalPort: Int,
+    verbose: Boolean = false
 )
 object Configuration {
   def apply(
@@ -47,7 +52,8 @@ object Configuration {
       workingDir: Option[Path],
       threads: Int,
       port: Int,
-      replicatorLocalPort: Int
+      replicatorLocalPort: Int,
+      verbose: Boolean = false
   ) =
     new Configuration(
       masterAddress,
@@ -56,7 +62,8 @@ object Configuration {
       workingDir,
       threads,
       port,
-      replicatorLocalPort
+      replicatorLocalPort,
+      verbose
     )
 }
 
@@ -114,6 +121,8 @@ object CmdParser {
       )
       .withDefault(7000)
 
+  val verbose: Opts[Boolean] = Opts.flag("verbose", "print logs to stdout").orFalse
+
   val parser: Opts[Configuration] =
     (
       masterAddr,
@@ -122,16 +131,51 @@ object CmdParser {
       workingDir,
       threads,
       port,
-      replicatorLocalPort
+      replicatorLocalPort,
+      verbose
     ).mapN(Configuration.apply)
 }
 
 object Main extends CommandIOApp(name = "worker", header = "worker binary") {
   private[this] val logger = new SourceLogger(getLogger, "workerBin")
   override def main: Opts[IO[ExitCode]] =
-    CmdParser.parser.map { case config @ Configuration(_, _, _, _, _, _, _) =>
-      workerProgram(config).map(_ => ExitCode.Success)
+    CmdParser.parser.map { case config @ Configuration(_, _, _, _, _, _, _, _) =>
+      configureLogging(config) >>
+        workerProgram(config).map(_ => ExitCode.Success)
     }
+
+  def configureLogging(config: Configuration): IO[Unit] = IO {
+    if (config.verbose) {
+      System.setProperty("CONSOLE_LOG_LEVEL", "INFO")
+
+      // reload logger
+      val context = getLoggerContext
+      context.reset()
+      val contextInitializer = new ContextInitializer(context)
+      contextInitializer.autoConfig()
+    } else ()
+  }
+
+  def getLoggerContext: LoggerContext = {
+    // sometimes `asInstanceOf[LoggerContext]` fails if logback is not fully initialized.
+    // try mutiple times until we can get logger.
+    var iLoggerFactory = LoggerFactory.getILoggerFactory
+    var attempts = 0
+    val maxAttempts = 10
+    while (iLoggerFactory.isInstanceOf[SubstituteLoggerFactory] && attempts < maxAttempts) {
+      // Trigger initialization again
+      LoggerFactory.getLogger(org.slf4j.Logger.ROOT_LOGGER_NAME)
+      Thread.sleep(50) // Give it a moment to bind
+      iLoggerFactory = LoggerFactory.getILoggerFactory
+      attempts += 1
+    }
+    if (iLoggerFactory.isInstanceOf[SubstituteLoggerFactory]) {
+      throw new IllegalStateException("SLF4J failed to bind to Logback after waiting.")
+    }
+
+    val rootLogger = LoggerFactory.getLogger(org.slf4j.Logger.ROOT_LOGGER_NAME)
+    LoggerFactory.getILoggerFactory().asInstanceOf[LoggerContext]
+  }
 
   val handlerMap: Map[String, JobHandler] = Map(
     "sample" -> new handlers.SampleJobHandler(),

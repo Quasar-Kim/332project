@@ -57,6 +57,11 @@ object Worker {
           outputDirectory = outputDirectory,
           workingDirectory = workDir
         )
+      _ <- IO.whenA(wtid == 0)(
+        logger.info(s"input directories: ${inputDirectories.map(_.toString).mkString(", ")}") >>
+          logger.info(s"working directory: ${workDir.toString}") >>
+          logger.info(s"output directory: ${outputDirectory.toString}")
+      )
 
       // replicator service (only on wtid == 0)
       replciatorFiber =
@@ -98,11 +103,15 @@ object Worker {
             .flatMap(_ => logger.error("server fiber exited prematurely"))
         }
 
+      _ <- logger.info(
+        s"connecting to scheduler server at ${masterAddr.ip}:${masterAddr.port}"
+      )
+
       _ <- ctx.schedulerRpcClient(masterAddr).use { schedulerClient =>
         for {
           // wait for registration
           _ <- logger.info(
-            s"worker (port=$port, wtid=$wtid) started, waiting for scheduler server..."
+            s"worker (port=$port, wtid=$wtid) connected to scheduler server, waiting for registration..."
           )
           _ <- registerWorkerToScheduler(schedulerClient, stateR, wtid, port, dirs, ctx)
           wid <- stateR.get.map(s => s.wid.get)
