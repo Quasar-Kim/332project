@@ -24,7 +24,7 @@ object ReplicatorLocalService {
   type ServiceType = ReplicatorLocalServiceFs2Grpc[IO, Metadata]
   type ClientType = ReplicatorRemoteServiceFs2Grpc[IO, Metadata]
 
-  private[this] val logger = new SourceLogger(getLogger, "replicator-logcal")
+  private[this] val logger = new SourceLogger(getLogger, "replicator-local")
 
   def init(
       replicatorAddrs: Map[Mid, NetAddr],
