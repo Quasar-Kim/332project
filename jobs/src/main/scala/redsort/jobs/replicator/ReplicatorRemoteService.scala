@@ -21,7 +21,7 @@ object ReplicatorRemoteService {
   type ServiceType = ReplicatorRemoteServiceFs2Grpc[IO, Metadata]
 
   private[this] val logger = new SourceLogger(getLogger, "replicator-remote")
-  private val CHUNK_SIZE = 10 * 1000 * 1000 // 10MB
+  private val CHUNK_SIZE = 1 * 1000 * 1000 // 10MB
 
   def init(
       ctx: FileStorage,

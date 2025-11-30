@@ -107,4 +107,30 @@ class ReplicatorSpec extends AsyncFunSpec {
       }
     }.timeout(5.seconds)
   }
+
+  test("pull-parallel-10MB", NetworkTest) {
+    val f = fixture(1)
+    f.integrationTest("pull-10MB") { case (fsA, fsB, clientA) =>
+      for {
+        contents <- IO.pure(Array.fill(10 * 1000 * 1000)(42.toByte))
+        _ <- fsB.writeAll("/working/hello1", contents)
+        _ <- fsB.writeAll("/working/hello2", contents)
+
+        // pull the file from machine B to machine A
+        requestOne = new PullRequest(path = "@{working}/hello1", src = 1)
+        requestTwo = new PullRequest(path = "@{working}/hello2", src = 1)
+        _ <- (
+          clientA.pull(requestOne, new Metadata),
+          clientA.pull(requestTwo, new Metadata)
+        ).parTupled
+
+        // read contents of replicated file
+        replicatedContentsOne <- fsA.readAll("/working/hello1")
+        replicatedContentsTwo <- fsA.readAll("/working/hello2")
+      } yield {
+        ByteString.copyFrom(replicatedContentsOne) shouldBe ByteString.copyFrom(contents)
+        ByteString.copyFrom(replicatedContentsTwo) shouldBe ByteString.copyFrom(contents)
+      }
+    }.timeout(5.seconds)
+  }
 }
