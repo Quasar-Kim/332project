@@ -74,6 +74,7 @@ object Worker {
               replicatorClient = replicatorClient
             )
             .useForever
+            .flatMap(_ => logger.error("server fiber exited prematurely"))
         }
 
       worker = new Worker {
@@ -86,22 +87,28 @@ object Worker {
         .use(schedulerClient =>
           for {
             _ <- registerWorkerToScheduler(schedulerClient, stateR, wtid, port, dirs, ctx)
-            replicatorIO = IO.whenA(wtid == 0)(
-              startReplicator(
-                stateR = stateR,
-                ctx = ctx,
-                dirs = dirs,
-                localPort = replicatorLocalPort,
-                remotePort = replicatorRemotePort
-              )
-            )
-            programIO = program(worker)
+            wid <- stateR.get.map(s => s.wid.get)
+            _ <- logger.debug(s"${wid}: working directory ${workDir}")
+            replicatorIO =
+              if (wtid == 0)
+                startReplicator(
+                  stateR = stateR,
+                  ctx = ctx,
+                  dirs = dirs,
+                  localPort = replicatorLocalPort,
+                  remotePort = replicatorRemotePort
+                )
+              else
+                IO.never[Unit]
+                  .flatMap(_ => logger.error("replicator exited prematurely"))
+            programIO = program(worker).flatMap(_ => logger.debug("user program exited"))
             _ <- programIO.race(replicatorIO)
           } yield ()
         )
 
       _ <- logger.info(s"worker (port=$port, wtid=$wtid) started, waiting for scheduler server...")
       _ <- serverFiber.race(mainFiber)
+      _ <- logger.info(s"worker (wtid: $wtid) done, running finalization")
       _ <- finalize(dirs, ctx)
     } yield ()
 
@@ -190,5 +197,8 @@ object Worker {
     )
 
   def finalize(dirs: Directories, ctx: FileStorage): IO[Unit] =
-    ctx.delete(dirs.workingDirectory.toString)
+    for {
+      _ <- logger.debug("cleaning working directory")
+      _ <- ctx.delete(dirs.workingDirectory.toString)
+    } yield ()
 }
