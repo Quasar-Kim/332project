@@ -36,7 +36,9 @@ class MergeJobHandler extends JobHandler {
 
       // create stream for each input files
       inputStreams = inputs.map { path =>
-        ctx.read(path.toString).chunkN(RECORD_SIZE).map(chunk => new Record(chunk.toArray))
+        ctx
+          .read(path.toString)
+          .chunkN(RECORD_SIZE)
       }
       // merge input stream into one stream
       mergedStream = sortedMerge(inputStreams)
@@ -44,7 +46,6 @@ class MergeJobHandler extends JobHandler {
       // write contents of merged stream into multiple outputs, grouping contents
       // by max size.
       writeStream = mergedStream
-        .map(record => Chunk.array(record.buf))
         .chunkN(recordsPerFile)
         .zipWithIndex
         .evalMap { case (chunk, index) =>
@@ -57,6 +58,20 @@ class MergeJobHandler extends JobHandler {
     } yield None
   }
 
+  implicit object RecordOrder extends Order[Chunk[Byte]] {
+    override def compare(x: Chunk[Byte], y: Chunk[Byte]): Int = {
+      var i = 0
+      while (i < 10) {
+        val a = x(i) & 0xff
+        val b = y(i) & 0xff
+
+        if (a != b) return a - b
+        else i += 1
+      }
+      0
+    }
+  }
+
   /** Merge sorted streams into one sorted stream by combining streams in balanced binary tree
     * fashion.
     *
@@ -65,7 +80,7 @@ class MergeJobHandler extends JobHandler {
     * @return
     *   sorted stream combining `streams`
     */
-  def sortedMerge(streams: Seq[Stream[IO, Record]]): Stream[IO, Record] = {
+  def sortedMerge(streams: Seq[Stream[IO, Chunk[Byte]]]): Stream[IO, Chunk[Byte]] = {
     streams.size match {
       case 0 => Stream.empty
       case 1 => streams.head
