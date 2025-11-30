@@ -9,12 +9,18 @@ import com.google.protobuf.any.{Any => ProtobufAny}
 import redsort.jobs.worker.Directories
 import redsort.jobs.messages.FileEntryMsg
 import redsort.jobs.Common.FileEntry
+import scala.concurrent.duration._
+import redsort.jobs.Common.assertIO
+import org.log4s._
+import redsort.jobs.SourceLogger
 
 /** Synchornize local working directory entries with entries scheduler knows. This effectively
   * cleans up no longer required intermediate files. Also fetches missing files from remote
   * machines. (NOT IMPLEMENTED)
   */
 object SyncJobHandler extends JobHandler {
+  private[this] val logger = new SourceLogger(getLogger)
+
   override def apply(
       args: Seq[ProtobufAny],
       inputs: Seq[Path],
@@ -23,16 +29,22 @@ object SyncJobHandler extends JobHandler {
       dirs: Directories
   ): IO[Option[Array[Byte]]] =
     for {
+      _ <- assertIO(outputs.length == 1, "one output file needs to be specified")
+
       localEntries <- ctx.list(dirs.workingDirectory.toString)
-      filesToDelete <- IO.pure {
-        val remoteFiles =
-          args
-            .map(path => Directories.resolvePath(dirs, Path(path.unpack[FileEntryMsg].path)))
-            .filter(_.startsWith(dirs.workingDirectory.toString))
-            .toSet
-        val localFiles = localEntries.keySet.map(Path(_))
-        localFiles &~ remoteFiles
+      localFiles <- IO.pure(localEntries.keySet.map(Path(_)))
+      remoteFiles <- IO.pure {
+        args
+          .map(path => Directories.resolvePath(dirs, Path(path.unpack[FileEntryMsg].path)))
+          .filter(_.startsWith(dirs.workingDirectory.toString))
+          .toSet
       }
+      filesToDelete <- IO.pure(localFiles &~ remoteFiles)
+      _ <- logger.info(s"deleting files: ${filesToDelete}")
       _ <- filesToDelete.toList.traverse(p => ctx.delete(p.toString))
+
+      // output file is required to force sync job to be scheduled to desired machine
+      // create output file with dummy contents, since not creating it can confuse scheduler
+      _ <- ctx.save(outputs(0).toString, fs2.Stream.emit(42.toByte))
     } yield None
 }

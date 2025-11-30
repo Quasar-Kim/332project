@@ -30,7 +30,7 @@ class SyncJobHandlerSpec extends AsyncSpec {
       _ <- SyncJobHandler(
         args = args.map(any.Any.pack(_)),
         inputs = Seq(),
-        outputs = Seq(),
+        outputs = Seq(Path("/working/synced")),
         ctx = storage,
         dirs = new Directories(
           inputDirectories = Seq(Path("/input")),

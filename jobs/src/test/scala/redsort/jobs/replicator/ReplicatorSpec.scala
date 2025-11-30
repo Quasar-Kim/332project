@@ -20,6 +20,8 @@ import io.grpc.Metadata
 import com.google.protobuf.ByteString
 import redsort.NetworkTest
 import scala.concurrent.duration._
+import redsort.jobs.messages.ReplicationResult
+import redsort.jobs.RPChelper
 
 trait FakeNetInfo extends NetInfo {
   override def getIP: IO[String] =
@@ -66,20 +68,24 @@ class ReplicatorSpec extends AsyncFunSpec {
             )
 
             replicators = (
-              Replicator.start(
-                replicatorAddrs = replicatorAddrs,
-                ctx = ctxOne,
-                dirs = dirs,
-                localPort = replicatorAlocalPort,
-                remotePort = 3000 + portOffset
-              ),
-              Replicator.start(
-                replicatorAddrs = replicatorAddrs,
-                ctx = ctxTwo,
-                dirs = dirs,
-                localPort = replicatorBlocalPort,
-                remotePort = 3050 + portOffset
-              )
+              Replicator
+                .start(
+                  replicatorAddrs = replicatorAddrs,
+                  ctx = ctxOne,
+                  dirs = dirs,
+                  localPort = replicatorAlocalPort,
+                  remotePort = 3000 + portOffset
+                )
+                .onError(e => IO.println(s"replicator A raised error: $e")),
+              Replicator
+                .start(
+                  replicatorAddrs = replicatorAddrs,
+                  ctx = ctxTwo,
+                  dirs = dirs,
+                  localPort = replicatorBlocalPort,
+                  remotePort = 3050 + portOffset
+                )
+                .onError(e => IO.println(s"replicator B raised error: $e"))
             ).parTupled
 
             _ <- replicators.race(body(ctxOne, ctxTwo, clientA))
@@ -87,6 +93,14 @@ class ReplicatorSpec extends AsyncFunSpec {
         }
       }
   }
+
+  def tryPull(
+      client: ReplicatorLocalService.ServiceType,
+      request: PullRequest
+  ): IO[ReplicationResult] =
+    client
+      .pull(request, new Metadata)
+      .handleErrorWith(RPChelper.handleRpcErrorWithRetry(tryPull(client, request)))
 
   test("pull-1KB", NetworkTest) {
     val f = fixture(0)
@@ -98,12 +112,38 @@ class ReplicatorSpec extends AsyncFunSpec {
 
         // pull the file from machine B to machine A
         request = new PullRequest(path = "@{working}/hello", src = 1)
-        _ <- clientA.pull(request, new Metadata)
+        _ <- tryPull(clientA, request)
 
         // read contents of replicated file
         replicatedContents <- fsA.readAll("/working/hello")
       } yield {
         ByteString.copyFrom(replicatedContents) shouldBe ByteString.copyFrom(contents)
+      }
+    }.timeout(5.seconds)
+  }
+
+  test("pull-parallel-10MB", NetworkTest) {
+    val f = fixture(1)
+    f.integrationTest("pull-10MB") { case (fsA, fsB, clientA) =>
+      for {
+        contents <- IO.pure(Array.fill(10 * 1000 * 1000)(42.toByte))
+        _ <- fsB.writeAll("/working/hello1", contents)
+        _ <- fsB.writeAll("/working/hello2", contents)
+
+        // pull the file from machine B to machine A
+        requestOne = new PullRequest(path = "@{working}/hello1", src = 1)
+        requestTwo = new PullRequest(path = "@{working}/hello2", src = 1)
+        _ <- (
+          tryPull(clientA, requestOne),
+          tryPull(clientA, requestTwo)
+        ).parTupled
+
+        // read contents of replicated file
+        replicatedContentsOne <- fsA.readAll("/working/hello1")
+        replicatedContentsTwo <- fsA.readAll("/working/hello2")
+      } yield {
+        ByteString.copyFrom(replicatedContentsOne) shouldBe ByteString.copyFrom(contents)
+        ByteString.copyFrom(replicatedContentsTwo) shouldBe ByteString.copyFrom(contents)
       }
     }.timeout(5.seconds)
   }

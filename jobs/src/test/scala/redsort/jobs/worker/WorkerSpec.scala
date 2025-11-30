@@ -52,6 +52,7 @@ class WorkerSpec extends AsyncSpec {
       )
     )
     (ctxStub.delete _).returnsWith(IO.unit)
+    (ctxStub.deleteRecursively _).returnsWith(IO.unit)
     (ctxStub.schedulerRpcClient _).returnsWith(Resource.eval(IO(schedulerClientStub)))
     (ctxStub.replicatorLocalRpcClient _).returnsWith(Resource.eval(IO(replicatorLocalClientStub)))
     (ctxStub.replicatorRemoteRpcClient _).returnsWith(Resource.eval(IO(replicatorRemoteClientStub)))

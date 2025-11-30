@@ -272,7 +272,7 @@ object SchedulerFiber {
 
     case JobFailed(result, from) => {
       for {
-        _ <- logger.error(s"$from failed to run job, reason: ${result.error.get.inner.get.message}")
+        _ <- logger.error(s"$from failed to run job, reason: ${result.error}")
         spec <- stateR.get.map(_.schedulerFiber.workers(from).runningJob.get.spec)
         _ <- mainFiberQueue.offer(new MainFiberEvents.JobFailed(spec = spec, result = result))
       } yield ()
@@ -371,6 +371,9 @@ object SchedulerFiber {
             .map(entryMsg => (entryMsg.path, FileEntry.fromMsg(entryMsg)))
         )
         .flatten
+        .filter { case (path, _) =>
+          path != "@{working}/synced"
+        } // do not track "synced" file procued by __sync__ job
         .to(Map)
       (mid, files)
     }

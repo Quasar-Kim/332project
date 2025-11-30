@@ -71,6 +71,14 @@ trait FileStorage {
     */
   def delete(path: String): IO[Unit]
 
+  /** Delete possibly nonempty directory recursively.
+    *
+    * @param path
+    *   absolute path to the file.
+    * @return
+    */
+  def deleteRecursively(path: String): IO[Unit]
+
   /** Check if file exists.
     *
     * @param path
