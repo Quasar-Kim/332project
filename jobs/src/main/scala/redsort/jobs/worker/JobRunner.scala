@@ -18,6 +18,7 @@ import redsort.jobs.SourceLogger
 import monocle.syntax.all._
 import io.grpc.Metadata
 import redsort.jobs.workers.SharedState
+import redsort.jobs.RPChelper
 
 trait JobRunner {
   def addHandler(entry: Tuple2[String, JobHandler]): IO[JobRunner]
@@ -108,13 +109,20 @@ object JobRunner {
           .map(_ => IO.unit)
 
       def tryPull(entry: FileEntry, sources: Seq[Mid]): IO[Unit] = {
-        // TODO: treat sources.length == 0 as iput replication failure
+        // TODO: treat sources.length == 0 as input replication failure
         val request = new PullRequest(path = entry.path, src = sources.head)
-        replicatorClient.pull(request, new Metadata).attempt.flatMap {
+        pullWithRetry(request).attempt.flatMap {
           case Left(err) => tryPull(entry, sources.tail)
           case Right(_)  => IO.unit
         }
       }
+
+      // NOTE: this will retry pull until local RPC service becomes available, and
+      // will NOT retry on replication failure.
+      private def pullWithRetry(request: PullRequest): IO[ReplicationResult] =
+        replicatorClient
+          .pull(request, new Metadata)
+          .handleErrorWith(RPChelper.handleRpcErrorWithRetry(pullWithRetry(request)))
 
       def prepareOuptputs(outputs: Seq[FileEntry]): IO[Seq[Path]] =
         IO.pure(fileEntriesToPaths(outputs))

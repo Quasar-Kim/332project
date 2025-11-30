@@ -20,6 +20,8 @@ import io.grpc.Metadata
 import com.google.protobuf.ByteString
 import redsort.NetworkTest
 import scala.concurrent.duration._
+import redsort.jobs.messages.ReplicationResult
+import redsort.jobs.RPChelper
 
 trait FakeNetInfo extends NetInfo {
   override def getIP: IO[String] =
@@ -92,6 +94,14 @@ class ReplicatorSpec extends AsyncFunSpec {
       }
   }
 
+  def tryPull(
+      client: ReplicatorLocalService.ServiceType,
+      request: PullRequest
+  ): IO[ReplicationResult] =
+    client
+      .pull(request, new Metadata)
+      .handleErrorWith(RPChelper.handleRpcErrorWithRetry(tryPull(client, request)))
+
   test("pull-1KB", NetworkTest) {
     val f = fixture(0)
     f.integrationTest("pull-1KB") { case (fsA, fsB, clientA) =>
@@ -102,7 +112,7 @@ class ReplicatorSpec extends AsyncFunSpec {
 
         // pull the file from machine B to machine A
         request = new PullRequest(path = "@{working}/hello", src = 1)
-        _ <- clientA.pull(request, new Metadata)
+        _ <- tryPull(clientA, request)
 
         // read contents of replicated file
         replicatedContents <- fsA.readAll("/working/hello")
@@ -124,8 +134,8 @@ class ReplicatorSpec extends AsyncFunSpec {
         requestOne = new PullRequest(path = "@{working}/hello1", src = 1)
         requestTwo = new PullRequest(path = "@{working}/hello2", src = 1)
         _ <- (
-          clientA.pull(requestOne, new Metadata),
-          clientA.pull(requestTwo, new Metadata)
+          tryPull(clientA, requestOne),
+          tryPull(clientA, requestTwo)
         ).parTupled
 
         // read contents of replicated file
