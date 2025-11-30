@@ -6,9 +6,6 @@ ThisBuild / organization := "org.postech.csed332_25.red"
 
 Global / cancelable := true
 
-// Required by artima supersafe plugin, which comes with sclatest
-ThisBuild / resolvers += "Artima Maven Repository" at "https://repo.artima.com/releases"
-
 lazy val commonSettings = Seq(
   scalafmtOnCompile := true,
   libraryDependencies ++= deps,
@@ -19,6 +16,15 @@ lazy val commonSettings = Seq(
   Test / logBuffered := false,
   // reprint all errors at the bottom of the test suite run.
   Test / testOptions += Tests.Argument("-oG"),
+
+  // Several libraries bring conflicting META-INF files. META-INF files are not needed at runtime.
+  assembly / assemblyMergeStrategy := {
+    case PathList("META-INF", "versions", xs @ _*) => MergeStrategy.discard
+    case "module-info.class"                       => MergeStrategy.discard
+    case x =>
+      val oldStrategy = (assembly / assemblyMergeStrategy).value
+      oldStrategy(x)
+  }
 )
 
 lazy val jobs = (project in file("jobs"))
@@ -32,13 +38,15 @@ lazy val master = (project in file("master"))
   .settings(commonSettings)
   .settings(
     assembly / assemblyJarName := "master.jar",
+    assembly / mainClass := Some("redsort.master.Main"),
   )
   .dependsOn(jobs)
 
 lazy val worker = (project in file("worker"))
   .settings(commonSettings)
   .settings(
-    assembly / assemblyJarName := "worker.jar"
+    assembly / assemblyJarName := "worker.jar",
+    assembly / mainClass := Some("redsort.worker.Main"),
   )
   .dependsOn(jobs)
 
