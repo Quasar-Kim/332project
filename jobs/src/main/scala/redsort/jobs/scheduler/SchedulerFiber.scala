@@ -223,8 +223,7 @@ object SchedulerFiber {
               }
             })
             _ <- logger.info(
-                s"$from completed job. pending: ${updatedState.schedulerFiber.workers(from).pendingJobs.length}, completed: ${updatedState.schedulerFiber.workers(from).completedJobs.length}"
-              )
+              s"$from completed job. pending: ${updatedState.schedulerFiber.workers(from).pendingJobs.length}, completed: ${updatedState.schedulerFiber.workers(from).completedJobs.length}"
             )
 
             // if all jobs are completed,
@@ -380,9 +379,9 @@ object SchedulerFiber {
     // apply changes to files
     val files =
       state.schedulerFiber.files
-        .lazyZip(obsoleteFiles)
-        .lazyZip(addedFileEntries)
-        .map { case ((mid, entries), (_, deletions), (_, additions)) =>
+        .map { case (mid, entries) =>
+          val deletions = obsoleteFiles(mid)
+          val additions = addedFileEntries(mid)
           (mid, entries.removedAll(deletions).concat(additions))
         }
         .to(Map)
@@ -420,8 +419,8 @@ object SchedulerFiber {
         val newEntryOption =
           workerStates.filter(_._1.wtid == hello.wtid).toSeq.sortBy(_._1.mid).find {
             case (_, state) =>
-          !state.initialized
-        }
+              !state.initialized
+          }
         newEntryOption match {
           case Some(newEntry) => Some(newEntry._1)
           case None           => None // invalid registration
