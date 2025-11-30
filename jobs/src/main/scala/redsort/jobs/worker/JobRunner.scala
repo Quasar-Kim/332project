@@ -69,12 +69,16 @@ object JobRunner {
 
           // run handler
           _ <- logger.debug(s"$wid: running handler for job ${spec.name}...")
+          start <- IO.realTime
           retval <- handler(spec.args, inputs, outputs, ctx, dirs)
             .onError(e => logger.error(s"body raised error: $e"))
             .adaptError { case e: Exception =>
               errorToWorkerError(WorkerErrorKind.BODY_ERROR, e)
             }
-          _ <- logger.debug(s"$wid: handler for job ${spec.name} returned")
+          end <- IO.realTime
+          _ <- logger.debug(
+            s"$wid: handler for job ${spec.name} returned, took ${(end - start) / 1000}"
+          )
 
           // job was successful, create job result
           outputs <- resolveFileSizes(spec.outputs, ctx)

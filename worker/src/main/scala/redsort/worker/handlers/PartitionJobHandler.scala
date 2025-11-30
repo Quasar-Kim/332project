@@ -30,40 +30,25 @@ class PartitionJobHandler extends JobHandler {
       ctx: FileStorage,
       d: Directories
   ): IO[Option[Array[Byte]]] = {
-
-    // pipe that writes chunk that is in `partition` to `path`.
-    def outputPipe(
-        path: Path,
-        partition: Tuple2[ByteString, ByteString]
-    ): Pipe[IO, Chunk[Byte], Unit] =
-      (inStream: Stream[IO, Chunk[Byte]]) => {
-        val sink = ctx.create(path.toString)
-        inStream
-          .filter { chunk =>
-            val key = ByteString.copyFrom(chunk.toArray.slice(0, 10))
-            isInPartition(key, partition)
-          }
-          .unchunks
-          .through(sink)
-      }
-
     for {
       _ <- assertIO(inputs.length == 1, "input length must be 1")
       _ <- assertIO(outputs.length > 0, "output length must be longer than 0")
 
-      // Create output pipes for each output files
+      contents <- ctx.readAll(inputs.head.toString)
       partitions = partitionsFromArgs(args)
-      outPipes = outputs.lazyZip(partitions).map { case (path, partition) =>
-        outputPipe(path, partition)
-      }
 
-      // Construct and run stream that reads from input file and partition it into outupt files
-      stream =
-        ctx
-          .read(inputs.head.toString)
-          .chunkN(RECORD_SIZE, allowFewer = false)
-          .broadcastThrough(outPipes: _*)
-      _ <- stream.compile.drain
+      slices <- Stream
+        .chunk(Chunk.array(contents))
+        .chunkN(100)
+        .groupAdjacentBy(findPartition(partitions))
+        .covary[IO]
+        .compile
+        .toList
+      sliceMap = slices.toMap
+
+      _ <- outputs.zipWithIndex.map { case (p, i) =>
+        ctx.save(p.toString, Stream.chunk(sliceMap.getOrElse(i, Chunk.empty)).unchunks)
+      }.parSequence
     } yield None
   }
 }
@@ -73,19 +58,37 @@ object PartitionJobHandler {
   val MIN_KEY = ByteString.fromHex("00" * 10)
   val MAX_KEY = ByteString.fromHex("ff" * 11)
 
-  implicit val byteStringComparator: Ordering[ByteString] =
-    Ordering.comparatorToOrdering(ByteString.unsignedLexicographicalComparator())
-
-  def partitionsFromArgs(args: Seq[ProtobufAny]): Seq[Tuple2[ByteString, ByteString]] = {
+  def partitionsFromArgs(args: Seq[ProtobufAny]): Seq[Tuple2[Chunk[Byte], Chunk[Byte]]] = {
     val ends = args.map(_.unpack[BytesArg].value)
     ends.zipWithIndex.map { case (end, i) =>
       val start = if (i == 0) MIN_KEY else ends(i - 1)
-      (start, end)
+      (Chunk.byteBuffer(start.asReadOnlyByteBuffer()), Chunk.byteBuffer(end.asReadOnlyByteBuffer()))
     }.toSeq
   }
 
-  def isInPartition(key: ByteString, p: Tuple2[ByteString, ByteString]): Boolean = {
+  implicit object RecordOrder extends Order[Chunk[Byte]] {
+    override def compare(x: Chunk[Byte], y: Chunk[Byte]): Int = {
+      if (x == MAX_KEY) return 1
+      else if (y == MAX_KEY) return -1
+
+      var i = 0
+      while (i < 10) {
+        val a = x(i) & 0xff
+        val b = y(i) & 0xff
+
+        if (a != b) return a - b
+        else i += 1
+      }
+      0
+    }
+  }
+
+  def isInPartition(key: Chunk[Byte])(p: Tuple2[Chunk[Byte], Chunk[Byte]]): Boolean = {
     val result = (key >= p._1) && (key < p._2)
     result
+  }
+
+  def findPartition(partitions: Seq[Tuple2[Chunk[Byte], Chunk[Byte]]])(chunk: Chunk[Byte]): Int = {
+    partitions.indexWhere(isInPartition(chunk))
   }
 }
