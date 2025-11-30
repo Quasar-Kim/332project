@@ -4,9 +4,10 @@
 
 ## Progress in this week
 
-- Implement the handlers of each job and corresponding tests
-- Implement `master` and `worker` binaries
-- Achieve milestone 2: Being able to sort small data on a local machine, without fault
+- Implemented handlers of each job and corresponding tests
+- Implemented `master` and `worker` binaries
+- Achieved milestone 2: Being able to sort small data on a local machine, without fault
+- Achieved milestone 3: Sorting large data on actual cluster without fault (details below)
 - Tested our implementation on local machine and fix bugs (WIP)
 
 ---
@@ -31,7 +32,7 @@
 
 ## Goal of the next week
 
-- Implement additional features to make the program fault tolerant
+- Start working on milestone 4: fault tolerance
 - Make sure our program runs correctly on the local or actual cluster
 - Optimize the performance of partition and merge job handlers
 
