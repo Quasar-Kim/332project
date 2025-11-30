@@ -49,7 +49,12 @@ object JobRunner {
 
       def runJobInner(spec: JobSpecMsg): IO[JobResult] =
         for {
-          wid <- stateR.get.map(s => s.wid.get)
+          wid <- stateR.get.flatMap(s =>
+            s.wid match {
+              case Some(value) => IO.pure(value)
+              case None        => IO.raiseError(new AssertionError("wid is none"))
+            }
+          )
           _ <- logger.debug(s"$wid: got job spec: ${spec}")
           _ <- logger.debug(s"$wid: preparing inputs for job ${spec.name}...")
           // prepare inputs and outputs
