@@ -9,6 +9,8 @@ import com.google.protobuf.any.{Any => ProtobufAny}
 import redsort.jobs.worker.Directories
 import redsort.jobs.messages.FileEntryMsg
 import redsort.jobs.Common.FileEntry
+import scala.concurrent.duration._
+import redsort.jobs.Common.assertIO
 
 /** Synchornize local working directory entries with entries scheduler knows. This effectively
   * cleans up no longer required intermediate files. Also fetches missing files from remote
@@ -23,16 +25,24 @@ object SyncJobHandler extends JobHandler {
       dirs: Directories
   ): IO[Option[Array[Byte]]] =
     for {
+      _ <- assertIO(outputs.length == 1, "one output file needs to be specified")
+
       localEntries <- ctx.list(dirs.workingDirectory.toString)
-      filesToDelete <- IO.pure {
-        val remoteFiles =
-          args
-            .map(path => Directories.resolvePath(dirs, Path(path.unpack[FileEntryMsg].path)))
-            .filter(_.startsWith(dirs.workingDirectory.toString))
-            .toSet
-        val localFiles = localEntries.keySet.map(Path(_))
-        localFiles &~ remoteFiles
+      localFiles <- IO.pure(localEntries.keySet.map(Path(_)))
+      remoteFiles <- IO.pure {
+        args
+          .map(path => Directories.resolvePath(dirs, Path(path.unpack[FileEntryMsg].path)))
+          .filter(_.startsWith(dirs.workingDirectory.toString))
+          .toSet
       }
+      filesToDelete <- IO.pure(localFiles &~ remoteFiles)
+      _ <- IO.println(
+        s"remote files: ${remoteFiles}\nlocal files: ${localFiles}\nwill delete: ${filesToDelete}\n\n"
+      )
       _ <- filesToDelete.toList.traverse(p => ctx.delete(p.toString))
+
+      // output file is required to force sync job to be scheduled to desired machine
+      // create output file with dummy contents, since not creating it can confuse scheduler
+      _ <- ctx.save(outputs(0).toString, fs2.Stream.emit(42.toByte))
     } yield None
 }

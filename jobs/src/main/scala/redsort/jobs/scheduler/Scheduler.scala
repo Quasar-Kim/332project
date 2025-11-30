@@ -259,7 +259,9 @@ object Scheduler {
         name = SYNC_JOB_NAME,
         args = entries.values.map(FileEntry.toMsg(_)).toSeq,
         inputs = Seq(),
-        outputs = Seq()
+        outputs = Seq(
+          new FileEntry(path = "@{working}/synced", size = -1, replicas = Seq(mid))
+        ) // this job will be scheduled to worker with `mid`
       )
     }
 

@@ -49,7 +49,9 @@ object JobRunner {
 
       def runJobInner(spec: JobSpecMsg): IO[JobResult] =
         for {
-          _ <- logger.debug(s"preparing inputs for job ${spec.name}...")
+          wid <- stateR.get.map(s => s.wid.get)
+          _ <- logger.debug(s"$wid: got job spec: ${spec}")
+          _ <- logger.debug(s"$wid: preparing inputs for job ${spec.name}...")
           // prepare inputs and outputs
           inputs <- prepareInputs(spec.inputs.map(FileEntry.fromMsg(_)))
           outputs <- prepareOuptputs(spec.outputs.map(FileEntry.fromMsg(_)))
@@ -60,11 +62,13 @@ object JobRunner {
           }
 
           // run handler
-          _ <- logger.debug(s"running handler for job ${spec.name}...")
-          retval <- handler(spec.args, inputs, outputs, ctx, dirs).adaptError { case e: Exception =>
-            errorToWorkerError(WorkerErrorKind.BODY_ERROR, e)
-          }
-          _ <- logger.debug(s"handler for job ${spec.name} returned")
+          _ <- logger.debug(s"$wid: running handler for job ${spec.name}...")
+          retval <- handler(spec.args, inputs, outputs, ctx, dirs)
+            .onError(e => logger.error(s"body raised error: $e"))
+            .adaptError { case e: Exception =>
+              errorToWorkerError(WorkerErrorKind.BODY_ERROR, e)
+            }
+          _ <- logger.debug(s"$wid: handler for job ${spec.name} returned")
 
           // job was successful, create job result
           outputs <- resolveFileSizes(spec.outputs, ctx)
