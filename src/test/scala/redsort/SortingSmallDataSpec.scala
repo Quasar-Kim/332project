@@ -17,11 +17,32 @@ import org.scalatest.funsuite.AsyncFunSuite
 import fs2.io.file.Path
 import redsort.jobs.Common.NetAddr
 import scala.concurrent.duration._
+import redsort.jobs.Common.Mid
+import redsort.jobs.Common.Wid
 
 @Slow
 class SortingSmallDataSpec extends AsyncFunSuite with AsyncIOSpec {
   val masterPortBase = new NextPort(5000)
   val workerPortBase = new NextPort(6001)
+
+  def spawnMasterAndWorker(config: TestConfig): IO[Seq[Mid]] =
+    (
+      spawnMaster(config),
+      spawnWorkers(config)
+    ).parMapN((workerAddrs, _) =>
+      DistributedSortingTestHelper.workerAddrsToMachineOrder(workerAddrs)
+    )
+
+  def spawnMaster(config: TestConfig): IO[Map[Wid, NetAddr]] =
+    MasterMain
+      .startScheduler(config.masterArgs)
+
+  def spawnWorkers(config: TestConfig): IO[Unit] =
+    (0 until config.numMachines)
+      .map(mid => IO.sleep(2.second * mid) >> WorkerMain.workerProgram(config.workerArgs(mid)))
+      .toList
+      .parSequence
+      .void
 
   test("sorting-1x1-1x1-1kb") {
     testSorting(
@@ -33,16 +54,7 @@ class SortingSmallDataSpec extends AsyncFunSuite with AsyncIOSpec {
       numWorkerThreads = 1,
       masterPort = masterPortBase.getNext,
       workerBasePort = workerPortBase.getNext
-    ) { config =>
-      (
-        MasterMain
-          .startScheduler(config.masterArgs),
-        (0 until config.numMachines)
-          .map(mid => WorkerMain.workerProgram(config.workerArgs(mid)))
-          .toList
-          .parSequence
-      ).parMapN((_, _) => Seq(0))
-    }
+    )(spawnMasterAndWorker)
   }
 
   test("sorting-2x1-1kb") {
@@ -55,18 +67,7 @@ class SortingSmallDataSpec extends AsyncFunSuite with AsyncIOSpec {
       numWorkerThreads = 1,
       masterPort = masterPortBase.getNext,
       workerBasePort = workerPortBase.getNext
-    ) { config =>
-      (
-        MasterMain
-          .startScheduler(config.masterArgs),
-        (0 until config.numMachines)
-          .map(mid => WorkerMain.workerProgram(config.workerArgs(mid)))
-          .toList
-          .parSequence
-      ).parMapN((workerAddrs, _) =>
-        DistributedSortingTestHelper.workerAddrsToMachineOrder(workerAddrs)
-      )
-    }
+    )(spawnMasterAndWorker)
   }
 
   test("sorting-1x1-10MB-multi-output") {
@@ -80,16 +81,7 @@ class SortingSmallDataSpec extends AsyncFunSuite with AsyncIOSpec {
       masterPort = masterPortBase.getNext,
       workerBasePort = workerPortBase.getNext,
       outFileSize = 1 // 1MB
-    ) { config =>
-      (
-        MasterMain
-          .startScheduler(config.masterArgs),
-        (0 until config.numMachines)
-          .map(mid => WorkerMain.workerProgram(config.workerArgs(mid)))
-          .toList
-          .parSequence
-      ).parMapN((_, _) => Seq(0))
-    }
+    )(spawnMasterAndWorker)
   }
 
   test("sorting-1x2-1kb") {
@@ -102,18 +94,20 @@ class SortingSmallDataSpec extends AsyncFunSuite with AsyncIOSpec {
       numWorkerThreads = 2,
       masterPort = masterPortBase.getNext,
       workerBasePort = workerPortBase.getNext
-    ) { config =>
-      (
-        MasterMain
-          .startScheduler(config.masterArgs),
-        (0 until config.numMachines)
-          .map(mid => WorkerMain.workerProgram(config.workerArgs(mid)))
-          .toList
-          .parSequence
-      ).parMapN((workerAddrs, _) =>
-        DistributedSortingTestHelper.workerAddrsToMachineOrder(workerAddrs)
-      )
-    }
+    )(spawnMasterAndWorker)
+  }
+
+  test("sorting-3x1-1x1-10kb") {
+    testSorting(
+      name = "sorting-3x1-1x1-10kb",
+      numMachines = 3,
+      numInputDirs = 1,
+      numFilesPerInputDir = 1,
+      recordsPerFile = 100,
+      numWorkerThreads = 1,
+      masterPort = masterPortBase.getNext,
+      workerBasePort = workerPortBase.getNext
+    )(spawnMasterAndWorker)
   }
 
   test("sorting-2x2-40MB") {
@@ -126,18 +120,7 @@ class SortingSmallDataSpec extends AsyncFunSuite with AsyncIOSpec {
       numWorkerThreads = 2,
       masterPort = masterPortBase.getNext,
       workerBasePort = workerPortBase.getNext
-    ) { config =>
-      (
-        MasterMain
-          .startScheduler(config.masterArgs),
-        (0 until config.numMachines)
-          .map(mid => IO.sleep(mid * 1.second) >> WorkerMain.workerProgram(config.workerArgs(mid)))
-          .toList
-          .parSequence
-      ).parMapN((workerAddrs, _) =>
-        DistributedSortingTestHelper.workerAddrsToMachineOrder(workerAddrs)
-      )
-    }
+    )(spawnMasterAndWorker)
   }
 
   test("sorting-2x4-400MB") {
@@ -150,17 +133,6 @@ class SortingSmallDataSpec extends AsyncFunSuite with AsyncIOSpec {
       numWorkerThreads = 4,
       masterPort = masterPortBase.getNext,
       workerBasePort = workerPortBase.getNext
-    ) { config =>
-      (
-        MasterMain
-          .startScheduler(config.masterArgs),
-        (0 until config.numMachines)
-          .map(mid => IO.sleep(mid * 3.second) >> WorkerMain.workerProgram(config.workerArgs(mid)))
-          .toList
-          .parSequence
-      ).parMapN((workerAddrs, _) =>
-        DistributedSortingTestHelper.workerAddrsToMachineOrder(workerAddrs)
-      )
-    }
+    )(spawnMasterAndWorker)
   }
 }

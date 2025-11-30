@@ -186,19 +186,22 @@ object DistributedSortingTestHelper {
 
     // validate sort order
     // first create summary file for each partition files.
-    val allSummaryFiles = allOutputFiles.map(p => {
-      val fileName = p.getFileName.toString
-      val index = fileName.substring("partition.".length, fileName.length).toInt
-      val summaryFilePath = p.getParent().getParent().resolve(s"out$index.sum")
-      val cmd = Seq("valsort", "-o", summaryFilePath.toString, p.toString)
-      val exit = cmd.!
+    val allSummaryFiles = allOutputFiles
+      .map(p => {
+        val fileName = p.getFileName.toString
+        val index = fileName.substring("partition.".length, fileName.length).toInt
+        val summaryFilePath = p.getParent().getParent().resolve(s"out$index.sum")
+        val cmd = Seq("valsort", "-o", summaryFilePath.toString, p.toString)
+        val exit = cmd.!
 
-      if (exit != 0) {
-        throw new RuntimeException(s"valsort summary generation failed for file ${p}.")
-      }
+        if (exit != 0) {
+          throw new RuntimeException(s"valsort summary generation failed for file ${p}.")
+        }
 
-      summaryFilePath
-    })
+        (index, summaryFilePath)
+      })
+      .sortBy(_._1)
+      .map(_._2)
 
     // then concatenate all summary files to all.sum file
     val catCmd = Seq("cat") ++ allSummaryFiles.map(_.toString)
