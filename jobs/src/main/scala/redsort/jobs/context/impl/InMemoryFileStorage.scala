@@ -34,6 +34,12 @@ class InMemoryFileStorage(ref: Ref[IO, Map[String, Array[Byte]]]) extends FileSt
     ref.update(fs => fs - path)
   }
 
+  override def deleteRecursively(path: String): IO[Unit] =
+    ref.update { state =>
+      val deletedFiles = state.keys.filter(_.startsWith(path))
+      state.removedAll(deletedFiles)
+    }
+
   override def exists(path: String): IO[Boolean] = {
     ref.get.map { state =>
       state.contains(path) ||

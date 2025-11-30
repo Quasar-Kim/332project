@@ -37,6 +37,9 @@ trait ProductionFileStorage extends FileStorage {
   def delete(path: String): IO[Unit] =
     Files[IO].deleteIfExists(Path(path)).void
 
+  def deleteRecursively(path: String): IO[Unit] =
+    Files[IO].deleteRecursively(Path(path))
+
   def exists(path: String): IO[Boolean] =
     Files[IO].exists(Path(path))
 

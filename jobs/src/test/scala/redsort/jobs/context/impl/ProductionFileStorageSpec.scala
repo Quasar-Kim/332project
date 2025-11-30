@@ -82,6 +82,23 @@ class ProductionFileStorageSpec extends AsyncSpec {
     }
   }
 
+  it should "delete nonempty directory recursively" in {
+    val content = "hello".getBytes
+
+    withStorage { (storage, root) =>
+      val dirPath = s"$root/deleteMe/"
+      val path = dirPath + "a"
+      for {
+        _ <- storage.mkDir(dirPath)
+        _ <- storage.writeAll(path, content)
+        _ <- storage.deleteRecursively(dirPath)
+        exists <- storage.exists(path)
+      } yield {
+        exists shouldBe false
+      }
+    }
+  }
+
   it should "rename a file correctly" in {
     val content = "Hello World!".getBytes
 
