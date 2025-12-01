@@ -26,8 +26,6 @@ trait Worker {
 }
 
 object Worker {
-  // private[this] val logger = new SourceLogger(getLogger, "worker")
-
   def apply(
       handlerMap: Map[String, JobHandler],
       masterAddr: NetAddr,
