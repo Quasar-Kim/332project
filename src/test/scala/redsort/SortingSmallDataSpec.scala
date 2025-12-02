@@ -123,16 +123,33 @@ class SortingSmallDataSpec extends AsyncFunSuite with AsyncIOSpec {
     )(spawnMasterAndWorker)
   }
 
-  test("sorting-2x4-400MB") {
+  test("sorting-10x1-1x1-1kb") {
     testSorting(
-      name = "sorting-2x4-400MB",
-      numMachines = 2,
-      numInputDirs = 2,
-      numFilesPerInputDir = 10,
-      recordsPerFile = 100 * 1000, // 100KB * 100 = 10MB
-      numWorkerThreads = 4,
+      name = "sorting-10x1-1x1-1kb",
+      numMachines = 10,
+      numInputDirs = 1,
+      numFilesPerInputDir = 1,
+      recordsPerFile = 100,
+      numWorkerThreads = 1,
       masterPort = masterPortBase.getNext,
       workerBasePort = workerPortBase.getNext
     )(spawnMasterAndWorker)
   }
+
+  // Due to memory constraints in the CI env, this spends too much times (due to GC). I disable it for now temporarily, but it should be re-enabled later.
+  // TODO: re-enable this test
+  
+  // test("sorting-2x4-400MB") {
+  //   testSorting(
+  //     name = "sorting-2x4-400MB",
+  //     numMachines = 2,
+  //     numInputDirs = 2,
+  //     numFilesPerInputDir = 10,
+  //     recordsPerFile = 100 * 1000, // 100KB * 100 = 10MB
+  //     numWorkerThreads = 4,
+  //     masterPort = masterPortBase.getNext,
+  //     workerBasePort = workerPortBase.getNext
+  //   )(spawnMasterAndWorker)
+  // }
+
 }
