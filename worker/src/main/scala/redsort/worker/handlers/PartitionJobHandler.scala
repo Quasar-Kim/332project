@@ -41,7 +41,7 @@ class PartitionJobHandler extends JobHandler {
       // If an entire big chunk belongs to a single partition, emit it as is.
       // If not, we can use existed logic to split into every records and assign partitions.
       // This optimization makes about 5x ~ 30x speedup in my test.
-      // ! This assumes that records are mostly ordered. In our use case, this is fine.
+      // The input file MUST be sorted!
       slices = Stream
         .chunk(Chunk.array(contents))
         .chunkN(BULK_SIZE)
