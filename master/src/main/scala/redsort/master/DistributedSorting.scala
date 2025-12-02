@@ -12,6 +12,7 @@ import redsort.jobs.scheduler.JobExecutionResult
 import org.log4s._
 import redsort.jobs.SourceLogger
 import redsort.jobs.messages.LongArg
+import scala.collection.immutable.TreeMap
 
 /** Configuration for `DistributedSorting`.
   *
@@ -166,7 +167,11 @@ object DistributedSorting {
 
   /** merge partition files into 128MB (or smaller) sized chunks
     */
-  def mergeStep(files: Map[Mid, Map[String, FileEntry]], outFileSize: Long): Seq[JobSpec] = {
+  def mergeStep(
+      unorderedFiles: Map[Mid, Map[String, FileEntry]],
+      outFileSize: Long
+  ): Seq[JobSpec] = {
+    val files = TreeMap.from(unorderedFiles)
     val inputPattern = "^@\\{working\\}\\/partition\\.(\\d+).(\\d+)$".r
     val (_, specs) = files.foldLeft((0, Seq[JobSpec]())) {
       case ((outputCounter, specs), (mid, machineFiles)) =>
