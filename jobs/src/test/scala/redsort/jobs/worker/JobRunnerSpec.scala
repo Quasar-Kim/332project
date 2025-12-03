@@ -21,6 +21,7 @@ import monocle.syntax.all._
 import io.grpc.Metadata
 import redsort.jobs.workers.SharedState
 import redsort.jobs.Common.Wid
+import redsort.jobs.Common.NetAddr
 
 class JobRunnerSpec extends AsyncSpec {
   def fixture = new {
@@ -30,16 +31,34 @@ class JobRunnerSpec extends AsyncSpec {
       outputDirectory = root / "output",
       workingDirectory = root / "working"
     )
+    val replicatorAddrs = Map(
+      0 -> NetAddr("1.1.1.1", 5000),
+      1 -> NetAddr("1.1.1.2", 5000),
+      2 -> NetAddr("1.1.1.3", 5000),
+      3 -> NetAddr("1.1.1.4", 5000)
+    )
+
     val fileIO = stub[FileStorage]
     (fileIO.exists _).returnsWith(IO.pure(true))
     (fileIO.fileSize _).returnsWith(IO.pure(1024.toLong))
 
     val handlerStub = stub[JobHandler]
     val replicatorStub = stub[ReplicatorLocalServiceFs2Grpc[IO, Metadata]]
+    (replicatorStub.pull _).returnsWith(IO.pure(new ReplicationResult(success = true)))
+    (replicatorStub.push _).returnsWith(IO.pure(new ReplicationResult(success = true)))
+
     val getJobRunner =
       for {
         stateR <- SharedState.init
-        _ <- stateR.modify { s => (s.focus(_.wid).replace(Some(new Wid(0, 0))), IO.unit) }
+        _ <- stateR.modify { s =>
+          (
+            s.focus(_.wid)
+              .replace(Some(new Wid(0, 0)))
+              .focus(_.replicatorAddrs)
+              .replace(replicatorAddrs),
+            IO.unit
+          )
+        }
         runner <- JobRunner(
           stateR = stateR,
           handlers = Map("hello" -> handlerStub),
@@ -188,8 +207,7 @@ class JobRunnerSpec extends AsyncSpec {
   it should "pull missing files from other machines" in {
     val f = fixture
     val filename = "@{output}/files/missing"
-    (f.fileIO.exists _).returns(name => IO.pure(name == filename))
-    (f.replicatorStub.pull _).returnsWith(IO.pure(new ReplicationResult(success = true)))
+    (f.fileIO.exists _).returns(name => IO.pure(name != filename))
     (f.handlerStub.apply _).returnsWith(IO.pure(None))
     val helloSpec = f.helloSpec
       .focus(_.inputs)
@@ -198,7 +216,7 @@ class JobRunnerSpec extends AsyncSpec {
           new FileEntryMsg(
             path = filename,
             size = -1,
-            replicas = Seq(1) // file is not available here
+            replicas = Seq(1) // file is not available in machine 0
           )
         )
       )
@@ -211,4 +229,101 @@ class JobRunnerSpec extends AsyncSpec {
       (f.replicatorStub.pull _).calls(0)._1.src shouldBe 1
     }
   }
+
+  it should "pull missing files from other machines even if replicas field is wrong" in {
+    val f = fixture
+    val filename = "@{output}/files/missing"
+    // file is not available in this machine
+    (f.fileIO.exists _).returns(name => IO.pure(name != filename))
+    (f.handlerStub.apply _).returnsWith(IO.pure(None))
+    val helloSpec = f.helloSpec
+      .focus(_.inputs)
+      .replace(
+        Seq(
+          new FileEntryMsg(
+            path = filename,
+            size = -1,
+            // jobspec says file is available on this machine but actually it isn't
+            // this mismatch can happen if current machine was restarted due to fault
+            replicas = Seq(0, 1)
+          )
+        )
+      )
+
+    for {
+      runner <- f.getJobRunner
+      result <- runner.runJob(helloSpec)
+    } yield {
+      (f.replicatorStub.pull _).calls(0)._1.path shouldBe filename
+      (f.replicatorStub.pull _).calls(0)._1.src shouldBe 1
+    }
+  }
+
+  it should "return failed result if all pull fails" in {
+    val f = fixture
+    val filename = "@{output}/files/missing"
+    (f.fileIO.exists _).returns(name => IO.pure(name != filename))
+    (f.replicatorStub.pull _)
+      .returnsWith(IO.raiseError[ReplicationResult](new IllegalArgumentException("some error")))
+    val helloSpec = f.helloSpec
+      .focus(_.inputs)
+      .replace(
+        Seq(
+          new FileEntryMsg(
+            path = filename,
+            size = -1,
+            replicas = Seq(1, 2)
+          )
+        )
+      )
+
+    for {
+      runner <- f.getJobRunner
+      result <- runner.runJob(helloSpec)
+    } yield {
+      // check if pull requests has been made
+      (f.replicatorStub.pull _).calls(0)._1.path shouldBe filename
+      (f.replicatorStub.pull _).calls(0)._1.src shouldBe 1
+      (f.replicatorStub.pull _).calls(1)._1.path shouldBe filename
+      (f.replicatorStub.pull _).calls(1)._1.src shouldBe 2
+
+      // check result
+      result.success shouldBe false
+      result.error.get.kind shouldBe WorkerErrorKind.INPUT_REPLICATION_ERROR
+    }
+  }
+
+  // it should "try replicating output file to one of remote replicators" in {
+  //   val f = fixture
+  //   (f.handlerStub.apply _).returnsWith(IO.pure(None))
+  //   (f.replicatorStub.push _).returnsOnCall {
+  //     case 4 => IO.pure(ReplicationResult(success = true))
+  //     case _ => IO.raiseError(new IllegalArgumentException("some error"))
+  //   }
+
+  //   for {
+  //     runner <- f.getJobRunner
+  //     result <- runner.runJob(f.helloSpec)
+  //   } yield {
+  //     assume(result.success)
+
+  //     (f.replicatorStub.push _).calls.length shouldBe 3
+  //     (f.replicatorStub.push _).calls.map(_._1.path).toSet shouldBe Set.fill(3)("@{output}/files/c")
+  //     (f.replicatorStub.push _).calls.map(_._1.dst).toSet shouldBe Set(1, 2, 3)
+  //   }
+  // }
+
+  // it should "return failed result of output push fails" in {
+  //   val f = fixture
+  //   (f.handlerStub.apply _).returnsWith(IO.pure(None))
+  //   (f.replicatorStub.push _).returnsWith(IO.raiseError(new IllegalArgumentException("some error")))
+
+  //   for {
+  //     runner <- f.getJobRunner
+  //     result <- runner.runJob(f.helloSpec)
+  //   } yield {
+  //     result.success shouldBe false
+  //     result.error.get.kind shouldBe WorkerErrorKind.OUTPUT_REPLICATION_ERROR
+  //   }
+  // }
 }

@@ -105,19 +105,39 @@ object JobRunner {
 
       def pullMissingFiles(inputs: Seq[FileEntry], mid: Int): IO[Unit] =
         inputs
-          .filter(!_.replicas.contains(mid))
           .traverse { entry =>
-            val sources = entry.replicas.filter(_ != mid)
-            tryPull(entry, sources)
+            ctx.exists(entry.path).flatMap {
+              case true  => IO.unit
+              case false => {
+                val sources = entry.replicas.filter(_ != mid)
+                val wrongReplicas = entry.replicas.contains(mid)
+                IO.whenA(wrongReplicas)(
+                  logger.warn(
+                    s"file ${entry.path} does not exists even though `replicas` field contains worker's mid ($mid). This is expected if this machine was restarted due to machine fault."
+                  )
+                ) >>
+                  tryPull(entry, sources)
+              }
+            }
           }
           .map(_ => IO.unit)
 
       def tryPull(entry: FileEntry, sources: Seq[Mid]): IO[Unit] = {
-        // TODO: treat sources.length == 0 as input replication failure
-        val request = new PullRequest(path = entry.path, src = sources.head)
-        pullWithRetry(request).attempt.flatMap {
-          case Left(err) => tryPull(entry, sources.tail)
-          case Right(_)  => IO.unit
+        sources match {
+          case Nil =>
+            logger.error(s"failed to pull missing file $entry") >>
+              IO.raiseError(
+                WorkerErrorWrapper(
+                  WorkerError(kind = WorkerErrorKind.INPUT_REPLICATION_ERROR, inner = None)
+                )
+              )
+          case head :: tail => {
+            val request = new PullRequest(path = entry.path, src = head)
+            pullWithRetry(request).attempt.flatMap {
+              case Left(err) => tryPull(entry, tail)
+              case Right(_)  => IO.unit
+            }
+          }
         }
       }
 
