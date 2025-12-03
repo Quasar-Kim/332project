@@ -23,7 +23,7 @@ object RPChelper {
         logger.error(s"RPC call raised fatal exception: $err") >> IO.raiseError[T](err)
     }
 
-  private def isTransportError(err: Throwable): Boolean = err match {
+  def isTransportError(err: Throwable): Boolean = err match {
     case e: StatusRuntimeException => e.getStatus.getCode == Status.Code.UNAVAILABLE
     case _                         => false
   }

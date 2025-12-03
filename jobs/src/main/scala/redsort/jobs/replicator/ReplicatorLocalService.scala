@@ -21,6 +21,8 @@ import fs2._
 import fs2.io.file.Path
 import redsort.jobs.messages.WriteRequest
 import com.google.protobuf.ByteString
+import redsort.jobs.RPChelper
+import scala.concurrent.duration._
 
 object ReplicatorLocalService {
   type ServiceType = ReplicatorLocalServiceFs2Grpc[IO, Metadata]
@@ -41,26 +43,21 @@ object ReplicatorLocalService {
           path = pullRequest.path
         )
 
-        // create stream
+        // call read() RPC method of remote replicator service, retrying max. 3 times
+        // when transport error happenes
         val client = clients(pullRequest.src)
-        val source = client.read(readRequest, new Metadata)
-        val stream = source
-          .map(msg =>
-            Chunk.byteBuffer(msg.data.asReadOnlyByteBuffer())
-          ) // convert `Packet` message into chunk
-          .unchunks
-
-        // save stream into local path
-        val localPath = Directories.resolvePath(dirs, Path(readRequest.path))
-        for {
-          _ <- logger.debug(s"pulling file ${pullRequest.path} from machine ${pullRequest.src}")
-          _ <- ctx.save(localPath.toString, stream)
-          _ <- logger.debug(s"pulled ${pullRequest.path}")
-        } yield new ReplicationResult(
-          success = true,
-          error = None,
-          stats = None
-        )
+        tryRead(client, readRequest, retriesLeft = 2) { stream =>
+          val localPath = Directories.resolvePath(dirs, Path(readRequest.path))
+          for {
+            _ <- logger.debug(s"pulling file ${pullRequest.path} from machine ${pullRequest.src}")
+            _ <- ctx.save(localPath.toString, stream)
+            _ <- logger.debug(s"pulled ${pullRequest.path}")
+          } yield new ReplicationResult(
+            success = true,
+            error = None,
+            stats = None
+          )
+        }
       }
 
       override def push(request: PushRequest, _ctx: Metadata): IO[ReplicationResult] = {
@@ -78,7 +75,53 @@ object ReplicatorLocalService {
         // call remote client's write() method
         val client = clients(request.dst)
         val stream = streamHead ++ streamTail
-        client.write(stream, new Metadata).map(_ => ReplicationResult(success = true))
+
+        tryWrite(client, stream, retriesLeft = 2).map(_ => ReplicationResult(success = true))
       }
     }
+
+  /** Call `read()` method of remote replicator RPC service with retries upon transport error.
+    */
+  def tryRead[T](rpcClient: ClientType, request: ReadRequest, retriesLeft: Int)(
+      callback: Stream[IO, Byte] => IO[T]
+  ): IO[T] = {
+    val stream = rpcClient
+      .read(request, new Metadata)
+      .map(msg =>
+        Chunk.byteBuffer(msg.data.asReadOnlyByteBuffer())
+      ) // convert `Packet` message into chunk
+      .unchunks
+    callback(stream).handleErrorWith {
+      case err if RPChelper.isTransportError(err) =>
+        for {
+          _ <- logger.error(s"replicator transport error (retry count: $retriesLeft): $err")
+          result <-
+            if (retriesLeft > 0)
+              IO.sleep(1.second) >> tryRead(rpcClient, request, retriesLeft - 1)(callback)
+            else IO.raiseError[T](err)
+        } yield result
+      case err =>
+        logger.error(s"replicator read() failed with fatal exception: $err") >> IO.raiseError[T](
+          err
+        )
+    }
+  }
+
+  def tryWrite(
+      rpcClient: ClientType,
+      stream: Stream[IO, WriteRequest],
+      retriesLeft: Int
+  ): IO[Unit] = {
+    rpcClient
+      .write(stream, new Metadata)
+      .handleErrorWith { err =>
+        if (retriesLeft > 0 && RPChelper.isTransportError(err)) {
+          RPChelper.handleRpcErrorWithRetry(tryWrite(rpcClient, stream, retriesLeft - 1))(err)
+        } else {
+          logger.error(s"replicator write() failed with fatal exception: $err") >>
+            IO.raiseError(err)
+        }
+      }
+      .flatMap(_ => IO.unit)
+  }
 }
