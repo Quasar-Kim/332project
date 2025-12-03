@@ -52,6 +52,9 @@ final case class TestConfig(
       replicatorLocalPort = workerBasePort + 1000 + 10 * mid
     )
   }
+
+  // total number of records in the input for an additional check during the validation of the result
+  def inputRecordCount: Int = numMachines * numInputDirs * numFilesPerInputDir * recordsPerFile
 }
 
 class NextPort(initialPort: Int) {
@@ -101,7 +104,7 @@ object DistributedSortingTestHelper {
         // prepare, run, then validate.
         _ <- IO(prepare(config))
         machineOrder <- body(config)
-        _ <- IO(validate(config.baseDir, machineOrder))
+        _ <- IO(validate(config.baseDir, machineOrder, config.inputRecordCount))
       } yield ()
     }
 
@@ -148,7 +151,7 @@ object DistributedSortingTestHelper {
     }
   }
 
-  private def validate(baseDir: Path, machineOrder: Seq[Int]) = {
+  private def validate(baseDir: Path, machineOrder: Seq[Int], inputRecordCount: Int) = {
     // 4. Run valsort
     // We must gather output files in the order of machines returned by the body.
     // Within a machine, we assume partition files are ordered by their partition number.
@@ -211,14 +214,38 @@ object DistributedSortingTestHelper {
       throw new Error(s"failed to concatenate summary files to ${summaryFile.toString}")
     }
 
+    // capture stdout of valsort validation
+    val valsortStdout = new StringBuilder
+    val valsortLogger = ProcessLogger((out: String) => valsortStdout.append(out + "\n"))
+
     // finally validate sort
     val valsortCmd = Seq("valsort", "-s", summaryFile.toString)
-    val valsortExit = valsortCmd.!
+    val valsortExit = valsortCmd.!(valsortLogger)
 
     if (valsortExit != 0) {
       throw new RuntimeException(
         s"valsort validation failed. Checked ${allOutputFiles.size} files."
       )
+    }
+
+    // valsort succeeded -- now checking the record count
+    val valsortStdoutStr = valsortStdout.toString
+
+    // extract the record count
+    val recordCountRegex = """Records: (\d+)""".r // "Records: <count>" in valsort output
+    val maybeOutputRecordCount =
+      recordCountRegex.findFirstMatchIn(valsortStdoutStr).map(_.group(1).toInt)
+    maybeOutputRecordCount match {
+      case Some(outputRecordCount) =>
+        if (inputRecordCount != outputRecordCount) {
+          throw new RuntimeException(
+            s"total record count mismatch: $inputRecordCount records in input, but $outputRecordCount in output"
+          )
+        }
+      case None =>
+        throw new RuntimeException(
+          s"could not find record count in valsort output"
+        )
     }
 
     // 5. Check for stray files
