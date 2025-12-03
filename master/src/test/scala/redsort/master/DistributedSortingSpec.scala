@@ -20,6 +20,8 @@ import redsort.jobs.messages.IntArg
 import redsort.jobs.Common.Mid
 import redsort.jobs.messages.BytesArg
 import monocle.syntax.all._
+import com.google.protobuf.any
+import redsort.jobs.messages.LongArg
 
 class DistributedSortingSpec
     extends AsyncFunSuite
@@ -32,130 +34,6 @@ class DistributedSortingSpec
     val sampleB = ByteString.copyFrom(List.fill(100)(0x41.toByte).toArray)
     val sampleC = ByteString.copyFrom(List.fill(100)(0x42.toByte).toArray)
     val sampleD = ByteString.copyFrom(List.fill(100)(0x43.toByte).toArray)
-
-    // test configuration: 2x4 cluster
-    // class SchedulerStub extends Scheduler {
-    //   override def waitInit: IO[Map[Int, Map[String, FileEntry]]] =
-    //     IO.pure(filesPerMachine)
-
-    //   override def runJobs(specs: Seq[JobSpec], sync: Boolean): IO[JobExecutionResult] = {
-    //     val results = callCount match {
-    //       case 1 => {
-    //         specs.map { spec => (spec, sampleJobResult(spec)) }
-    //       }
-    //       case 2 | 3 | 4 | 5 =>
-    //         specs.map { spec => (spec, jobResultWithoutRetval) }
-
-    //       case _ => throw new AssertionError("runJob called more than 5 times")
-    //     }
-
-    //     filesPerMachine = specs.foldLeft(filesPerMachine) { case (files, spec) =>
-    //       files.map { case (mid, localFiles) =>
-    //         // remove input files that starts with @{working}
-    //         val deletedKeys = spec.inputs
-    //           .filter(_.replicas.contains(mid))
-    //           .filter(_.path.startsWith("@{working}"))
-    //           .map(_.path)
-
-    //         // create output files
-    //         val createdEntries =
-    //           spec.outputs.filter(_.replicas.contains(mid)).map(entry => (entry.path, entry))
-
-    //         // localFiles.removedAll(deletedKeys).concat(createdEntries)
-    //         val updatedLocalFiles = localFiles.removedAll(deletedKeys).concat(createdEntries)
-    //         (mid, updatedLocalFiles)
-    //       }
-    //     }
-
-    //     IO.pure(
-    //       new JobExecutionResult(
-    //         results = results,
-    //         files = filesPerMachine
-    //       )
-    //     )
-    //   }
-
-    //   def sampleJobResult(spec: JobSpec): JobResult = {
-    //     // create job result with 2 sampled entries
-    //     val retval = spec.inputs(0).replicas(0) match {
-    //       case 0 => Some(sampleA.concat(sampleB))
-    //       case 1 => Some(sampleC.concat(sampleD))
-    //     }
-
-    //     new JobResult(
-    //       success = true,
-    //       retval = retval,
-    //       error = None,
-    //       stats = None
-    //     )
-    //   }
-
-    //   def jobResultWithoutRetval: JobResult =
-    //     new JobResult(
-    //       success = true,
-    //       retval = None,
-    //       error = None,
-    //       stats = None
-    //     )
-
-    //   override def complete: IO[Unit] =
-    //     IO.unit
-
-    //   var callCount = 0
-    //   var filesPerMachine = Map(
-    //     /*
-    //     /data1: input.0, input.1
-    //     /data2: input.0, input.1
-    //      */
-    //     0 -> Map(
-    //       "@{input}/data1/input.0" -> new FileEntry(
-    //         path = "@{input}/data1/input.0",
-    //         size = 1024,
-    //         replicas = Seq(0)
-    //       ),
-    //       "@{input}/data1/input.1" -> new FileEntry(
-    //         path = "@{input}/data1/input.1",
-    //         size = 1024,
-    //         replicas = Seq(0)
-    //       ),
-    //       "@{input}/data2/input.0" -> new FileEntry(
-    //         path = "@{input}/data2/input.0",
-    //         size = 1024,
-    //         replicas = Seq(0)
-    //       ),
-    //       "@{input}/data2/input.1" -> new FileEntry(
-    //         path = "@{input}/data2/input.1",
-    //         size = 1024,
-    //         replicas = Seq(0)
-    //       )
-    //     ),
-    //     // assume machine 1 has also same disk configuration
-    //     1 -> Map(
-    //       "@{input}/data1/input.0" -> new FileEntry(
-    //         path = "@{input}/data1/input.0",
-    //         size = 1024,
-    //         replicas = Seq(0)
-    //       ),
-    //       "@{input}/data1/input.1" -> new FileEntry(
-    //         path = "@{input}/data1/input.1",
-    //         size = 1024,
-    //         replicas = Seq(0)
-    //       ),
-    //       "@{input}/data2/input.0" -> new FileEntry(
-    //         path = "@{input}/data2/input.0",
-    //         size = 1024,
-    //         replicas = Seq(0)
-    //       ),
-    //       "@{input}/data2/input.1" -> new FileEntry(
-    //         path = "@{input}/data2/input.1",
-    //         size = 1024,
-    //         replicas = Seq(0)
-    //       )
-    //     )
-    //   )
-    // }
-
-    // val scheduler = new SchedulerStub
   }
 
   val machineOneInputs = Map(
@@ -488,12 +366,14 @@ class DistributedSortingSpec
         )
       ).concat(machineTwoInputs)
     )
-    val specs = DistributedSorting.mergeStep(files)
+    val specs = DistributedSorting.mergeStep(files, outFileSize = 128 * 1024 * 1024)
 
     def jobSpec(inputs: Seq[FileEntry], outputs: Seq[FileEntry]) =
       new JobSpec(
         name = "merge",
-        args = Seq(),
+        args = Seq(
+          new LongArg(128 * 1024 * 1024)
+        ),
         inputs = inputs,
         outputs = outputs
       )

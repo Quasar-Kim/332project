@@ -59,6 +59,9 @@ trait Scheduler {
     * `waitInit`ed.
     */
   def machineAddrs: IO[Seq[String]]
+
+  /** Returns addresses of all workers. */
+  def workerAddrs: IO[Map[Wid, NetAddr]]
 }
 
 final case class JobExecutionResult(
@@ -86,13 +89,13 @@ object Scheduler {
     * @return
     *   a resource wrapping `Scheduler` logic that allow user to interact with scheduler system.
     */
-  def apply(
+  def apply[T](
       port: Int,
       numMachines: Int,
       numWorkersPerMachine: Int,
       ctx: SchedulerCtx,
       scheduleLogic: ScheduleLogic = SimpleScheduleLogic
-  )(program: Scheduler => IO[Unit]): IO[Unit] = {
+  )(program: Scheduler => IO[T]): IO[T] = {
     for {
       // Initialize internal shared states.
       wids <- workerIds(numMachines, numWorkersPerMachine)
@@ -124,9 +127,6 @@ object Scheduler {
             .start(stateR, wid, rpcClientFiberQueues(wid), schedulerFiberQueue, ctx)
             .useForever
         }
-        // REMOVEME
-        // IO.raiseError(new RuntimeException("let's see how error is handled here"))
-        //   .delayBy(100.millis)
       ).parTupled
 
       // actual scheduler definition here, bound with arguments passed to apply().
@@ -157,10 +157,14 @@ object Scheduler {
               case JobFailed(spec, result) =>
                 IO.raiseError[JobExecutionResult](
                   new RuntimeException(
-                    s"Job execution failed: kind= ${result.error.get.kind}, spec=$spec",
-                    result.error.get.inner match {
-                      case Some(inner) => JobSystemException.fromMsg(inner, source = "worker")
-                      case None        => null
+                    s"Job execution failed: error= ${result.error}, spec=$spec",
+                    result.error match {
+                      case Some(err) =>
+                        err.inner match {
+                          case Some(inner) => JobSystemException.fromMsg(inner, source = "worker")
+                          case None        => null
+                        }
+                      case None => null
                     }
                   )
                 )
@@ -192,11 +196,21 @@ object Scheduler {
               .sortBy { case (wid, _) => wid.mid }
               .map { case (_, ip) => ip }
           )
+
+        override def workerAddrs: IO[Map[Wid, NetAddr]] =
+          stateR.get.map(state =>
+            state.schedulerFiber.workers.map { case (wid, workerState) =>
+              (wid, workerState.netAddr.get)
+            }
+          )
       }
 
       // run program with scheduler
-      _ <- backgroundFibers.race(program(scheduler))
-    } yield ()
+      result <- backgroundFibers.race(program(scheduler))
+    } yield result match {
+      case Left(_)      => throw new Unreachable
+      case Right(value) => value
+    }
   }
 
   /** Generate sequence of worker IDs.
@@ -246,7 +260,9 @@ object Scheduler {
         name = SYNC_JOB_NAME,
         args = entries.values.map(FileEntry.toMsg(_)).toSeq,
         inputs = Seq(),
-        outputs = Seq()
+        outputs = Seq(
+          new FileEntry(path = "@{working}/synced", size = -1, replicas = Seq(mid))
+        ) // this job will be scheduled to worker with `mid`
       )
     }
 

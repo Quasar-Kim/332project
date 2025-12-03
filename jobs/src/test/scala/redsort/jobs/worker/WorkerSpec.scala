@@ -18,10 +18,14 @@ import redsort.jobs.messages.WorkerFs2Grpc
 import io.grpc.Server
 import com.google.protobuf.empty.Empty
 import scala.concurrent.TimeoutException
+import redsort.jobs.messages.ReplicatorLocalServiceFs2Grpc
+import redsort.jobs.messages.ReplicatorRemoteServiceFs2Grpc
 
 class WorkerSpec extends AsyncSpec {
   def fixture = new {
     val schedulerClientStub = stub[SchedulerFs2Grpc[IO, Metadata]]
+    val replicatorLocalClientStub = stub[ReplicatorLocalServiceFs2Grpc[IO, Metadata]]
+    val replicatorRemoteClientStub = stub[ReplicatorRemoteServiceFs2Grpc[IO, Metadata]]
     val replicators =
       Map(0 -> new NetAddrMsg("1.2.3.3", 8000), 1 -> new NetAddrMsg("1.2.3.4", 8000))
     (schedulerClientStub.registerWorker _).returnsWith(
@@ -33,6 +37,8 @@ class WorkerSpec extends AsyncSpec {
         )
       )
     )
+    val serverStub = stub[Server]
+    (serverStub.start _).returnsWith(serverStub)
     val ctxStub = stub[WorkerCtx]
     (ctxStub.mkDir _).returns { arg => IO(arg) }
     (ctxStub.exists _).returnsWith(IO.pure(true))
@@ -45,9 +51,13 @@ class WorkerSpec extends AsyncSpec {
         )
       )
     )
+    (ctxStub.delete _).returnsWith(IO.unit)
+    (ctxStub.deleteRecursively _).returnsWith(IO.unit)
     (ctxStub.schedulerRpcClient _).returnsWith(Resource.eval(IO(schedulerClientStub)))
-    val serverStub = stub[Server]
-    (serverStub.start _).returnsWith(serverStub)
+    (ctxStub.replicatorLocalRpcClient _).returnsWith(Resource.eval(IO(replicatorLocalClientStub)))
+    (ctxStub.replicatorRemoteRpcClient _).returnsWith(Resource.eval(IO(replicatorRemoteClientStub)))
+    (ctxStub.replicatorLocalRpcServer _).returnsWith(Resource.eval(IO(serverStub)))
+    (ctxStub.replicatorRemoteRpcServer _).returnsWith(Resource.eval(IO(serverStub)))
 
     val dirs = new Directories(
       inputDirectories = Seq(Path("/sda")),
@@ -55,27 +65,32 @@ class WorkerSpec extends AsyncSpec {
       workingDirectory = Path("/working")
     )
 
-    val workerAndServer = for {
-      // intercept grpc server implementation
-      grpcDeferred <- Resource.eval(IO.deferred[WorkerFs2Grpc[IO, Metadata]])
-      _ <- Resource.eval(IO((ctxStub.workerRpcServer _).returns { case (grpc, port) =>
-        Resource.eval(grpcDeferred.complete(grpc) >> IO(serverStub))
-      }))
-
-      // start worker
-      worker <- Worker(
-        handlerMap = Map(),
-        masterAddr = new NetAddr("127.0.0.1", 6000),
-        inputDirectories = Seq(Path("/sda")),
-        outputDirectory = Path("/output"),
-        wtid = 0,
-        port = 5000,
-        ctx = ctxStub
-      )
-
-      // get grpc implementation
-      grpc <- Resource.eval(grpcDeferred.get)
-    } yield (worker, grpc)
+    def withWorkerAndGrpc(
+        body: (Worker, WorkerFs2Grpc[IO, Metadata]) => IO[Unit]
+    ): IO[Unit] =
+      for {
+        // intercept grpc server implementation
+        grpcDeferred <- IO.deferred[WorkerFs2Grpc[IO, Metadata]]
+        _ <- IO((ctxStub.workerRpcServer _).returns { case (grpc, port) =>
+          Resource.eval(grpcDeferred.complete(grpc) >> IO(serverStub))
+        })
+        _ <- Worker(
+          handlerMap = Map(),
+          masterAddr = new NetAddr("127.0.0.1", 6000),
+          inputDirectories = Seq(Path("/sda")),
+          outputDirectory = Path("/output"),
+          wtid = 0,
+          port = 5000,
+          ctx = ctxStub,
+          replicatorLocalPort = 6000,
+          replicatorRemotePort = 7000
+        ) { worker =>
+          for {
+            grpc <- grpcDeferred.get
+            _ <- body(worker, grpc)
+          } yield ()
+        }
+      } yield ()
   }
 
   behavior of "Worker.registerWorkerToScheduler"
@@ -157,7 +172,7 @@ class WorkerSpec extends AsyncSpec {
   "Worker.waitForComplete" should "return when scheduler call Complete() RPC method" in {
     val f = fixture
 
-    f.workerAndServer.use { case (worker, grpc) =>
+    f.withWorkerAndGrpc { (worker, grpc) =>
       for {
         _ <- worker.waitForComplete.timeout(500.millis).assertThrows[TimeoutException]
         _ <- grpc.complete(new Empty, new Metadata)

@@ -11,11 +11,29 @@ import com.google.protobuf.ByteString
 import redsort.jobs.scheduler.JobExecutionResult
 import org.log4s._
 import redsort.jobs.SourceLogger
+import redsort.jobs.messages.LongArg
+import scala.collection.immutable.TreeMap
+
+/** Configuration for `DistributedSorting`.
+  *
+  * @param outFileSize
+  *   max size of each outputs files (`partition.$n` files)
+  */
+final case class DistributedSortingConfig(
+    outFileSize: Long
+)
+object DistributedSortingConfig {
+  val default = new DistributedSortingConfig(
+    outFileSize = 128 * 1000 * 1000 // 128MB
+  )
+}
 
 object DistributedSorting {
   private[this] val logger = new SourceLogger(getLogger, "master")
 
-  def run(scheduler: Scheduler): IO[Unit] =
+  def run(
+      config: DistributedSortingConfig = DistributedSortingConfig.default
+  )(scheduler: Scheduler): IO[Map[Wid, NetAddr]] =
     for {
       // print master IP:port
       netAddr <- scheduler.netAddr
@@ -34,7 +52,7 @@ object DistributedSorting {
       // calculate partitions
       samples <- IO.pure(getSamplesFromResults(samplingResult))
       _ <- logger.info(
-        s"calculating partitions from ${samples.size() / 1024 / 1024} MB samples..."
+        s"calculated partitions from ${samples.size() / 1024 / 1024} MB samples..."
       )
       partitions <- IO.pure(
         Partition.findPartitions(
@@ -54,13 +72,16 @@ object DistributedSorting {
 
       // stage 4: merge
       _ <- logger.info("stage 4: merging")
-      mergeResult <- scheduler.runJobs(mergeStep(partitionResult.files))
+      mergeResult <- scheduler.runJobs(
+        mergeStep(partitionResult.files, outFileSize = config.outFileSize)
+      )
 
       // finalize
+      workerAddrs <- scheduler.workerAddrs
       _ <- logger.info("shutting down cluster...")
       _ <- scheduler.complete
       _ <- logger.info("done!")
-    } yield ()
+    } yield workerAddrs
 
   private def getSamplesFromResults(result: JobExecutionResult): ByteString =
     result.results
@@ -146,7 +167,11 @@ object DistributedSorting {
 
   /** merge partition files into 128MB (or smaller) sized chunks
     */
-  def mergeStep(files: Map[Mid, Map[String, FileEntry]]): Seq[JobSpec] = {
+  def mergeStep(
+      unorderedFiles: Map[Mid, Map[String, FileEntry]],
+      outFileSize: Long
+  ): Seq[JobSpec] = {
+    val files = TreeMap.from(unorderedFiles)
     val inputPattern = "^@\\{working\\}\\/partition\\.(\\d+).(\\d+)$".r
     val (_, specs) = files.foldLeft((0, Seq[JobSpec]())) {
       case ((outputCounter, specs), (mid, machineFiles)) =>
@@ -168,16 +193,16 @@ object DistributedSorting {
           inputs.foldLeft((0.toLong, outputCounter, Seq[FileEntry]())) {
             case ((sizeAcc, i, outputsAcc), entry) =>
               val nextSizeAcc = sizeAcc + entry.size
-              if (nextSizeAcc >= 128 * 1024 * 1024) {
-                (0.toLong until (nextSizeAcc / (128 * 1024 * 1024)))
+              if (nextSizeAcc >= outFileSize) {
+                (0.toLong until (nextSizeAcc / (outFileSize)))
                   .foldLeft((nextSizeAcc, i, outputsAcc)) {
                     case ((remainingSize, j, outputEntries), _) =>
                       val output = new FileEntry(
                         path = s"@{output}/partition.$j",
-                        size = 128 * 1024 * 1024,
+                        size = outFileSize,
                         replicas = Seq(mid)
                       )
-                      (remainingSize - 128 * 1024 * 1024, j + 1, outputEntries :+ output)
+                      (remainingSize - outFileSize, j + 1, outputEntries :+ output)
                   }
               } else (nextSizeAcc, i, outputsAcc)
           }
@@ -195,7 +220,9 @@ object DistributedSorting {
         // create merge spec
         val spec = new JobSpec(
           name = "merge",
-          args = Seq(),
+          args = Seq(
+            new LongArg(outFileSize)
+          ),
           inputs = inputs,
           outputs = outputs
         )

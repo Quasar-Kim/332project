@@ -8,6 +8,8 @@ import fs2.io.file.{Files, Path}
 import java.io.FileNotFoundException
 import redsort.jobs.context.interface.FileStorage
 import redsort.jobs.Common.FileEntry
+import fs2.io.file.CopyFlags
+import fs2.io.file.CopyFlag
 
 /** Actual implementation of `FileStorage`.
   */
@@ -35,6 +37,9 @@ trait ProductionFileStorage extends FileStorage {
   def delete(path: String): IO[Unit] =
     Files[IO].deleteIfExists(Path(path)).void
 
+  def deleteRecursively(path: String): IO[Unit] =
+    Files[IO].deleteRecursively(Path(path))
+
   def exists(path: String): IO[Boolean] =
     Files[IO].exists(Path(path))
 
@@ -56,4 +61,21 @@ trait ProductionFileStorage extends FileStorage {
 
   def mkDir(path: String): IO[String] =
     Files[IO].createDirectory(Path(path)) >> IO.pure(path)
+
+  def save(path: String, data: Stream[IO, Byte]): IO[Unit] = {
+    val target = Path(path)
+    val temp = Path(path + ".tmp")
+
+    val writeAndMove = for {
+      _ <- data.through(Files[IO].writeAll(temp)).compile.drain
+      _ <- Files[IO].move(
+        temp,
+        target,
+        CopyFlags(CopyFlag.AtomicMove, CopyFlag.ReplaceExisting)
+      )
+    } yield ()
+    val deleteTemp = Files[IO].deleteIfExists(temp).void
+
+    IO.bracketFull(_ => IO.unit)(_ => writeAndMove)((_, _) => deleteTemp)
+  }
 }

@@ -16,6 +16,9 @@ import com.google.protobuf.ByteString
 import redsort.jobs.Unreachable
 import redsort.jobs.SourceLogger
 import monocle.syntax.all._
+import io.grpc.Metadata
+import redsort.jobs.workers.SharedState
+import redsort.jobs.RPChelper
 
 trait JobRunner {
   def addHandler(entry: Tuple2[String, JobHandler]): IO[JobRunner]
@@ -30,11 +33,13 @@ object JobRunner {
       handlers: Map[String, JobHandler],
       dirs: Directories,
       ctx: FileStorage,
-      logger: SourceLogger
+      logger: SourceLogger,
+      replicatorClient: ReplicatorLocalServiceFs2Grpc[IO, Metadata],
+      stateR: Ref[IO, SharedState]
   ): IO[JobRunner] =
     IO.pure(new JobRunner {
       override def addHandler(entry: (String, JobHandler)): IO[JobRunner] =
-        JobRunner(handlers + entry, dirs, ctx, logger)
+        JobRunner(handlers + entry, dirs, ctx, logger, replicatorClient, stateR)
 
       override def runJob(spec: JobSpecMsg): IO[JobResult] =
         runJobInner(spec).handleErrorWith {
@@ -45,6 +50,14 @@ object JobRunner {
 
       def runJobInner(spec: JobSpecMsg): IO[JobResult] =
         for {
+          wid <- stateR.get.flatMap(s =>
+            s.wid match {
+              case Some(value) => IO.pure(value)
+              case None        => IO.raiseError(new AssertionError("wid is none"))
+            }
+          )
+          _ <- logger.debug(s"$wid: got job spec: ${spec}")
+          _ <- logger.debug(s"$wid: preparing inputs for job ${spec.name}...")
           // prepare inputs and outputs
           inputs <- prepareInputs(spec.inputs.map(FileEntry.fromMsg(_)))
           outputs <- prepareOuptputs(spec.outputs.map(FileEntry.fromMsg(_)))
@@ -55,9 +68,17 @@ object JobRunner {
           }
 
           // run handler
-          retval <- handler(spec.args, inputs, outputs, ctx, dirs).adaptError { case e: Exception =>
-            errorToWorkerError(WorkerErrorKind.BODY_ERROR, e)
-          }
+          _ <- logger.debug(s"$wid: running handler for job ${spec.name}...")
+          start <- IO.realTime
+          retval <- handler(spec.args, inputs, outputs, ctx, dirs)
+            .onError(e => logger.error(s"body raised error: $e"))
+            .adaptError { case e: Exception =>
+              errorToWorkerError(WorkerErrorKind.BODY_ERROR, e)
+            }
+          end <- IO.realTime
+          _ <- logger.debug(
+            s"$wid: handler for job ${spec.name} returned, took ${(end - start) / 1000}"
+          )
 
           // job was successful, create job result
           outputs <- resolveFileSizes(spec.outputs, ctx)
@@ -75,9 +96,37 @@ object JobRunner {
           )
         }
 
-      // later this method will replicate input files
-      def prepareInputs(inputs: Seq[FileEntry]): IO[Seq[Path]] =
-        IO.pure(fileEntriesToPaths(inputs))
+      def prepareInputs(inputs: Seq[FileEntry]): IO[Seq[Path]] = {
+        for {
+          mid <- stateR.get.map(s => s.wid.get.mid)
+          _ <- pullMissingFiles(inputs, mid)
+        } yield fileEntriesToPaths(inputs)
+      }
+
+      def pullMissingFiles(inputs: Seq[FileEntry], mid: Int): IO[Unit] =
+        inputs
+          .filter(!_.replicas.contains(mid))
+          .traverse { entry =>
+            val sources = entry.replicas.filter(_ != mid)
+            tryPull(entry, sources)
+          }
+          .map(_ => IO.unit)
+
+      def tryPull(entry: FileEntry, sources: Seq[Mid]): IO[Unit] = {
+        // TODO: treat sources.length == 0 as input replication failure
+        val request = new PullRequest(path = entry.path, src = sources.head)
+        pullWithRetry(request).attempt.flatMap {
+          case Left(err) => tryPull(entry, sources.tail)
+          case Right(_)  => IO.unit
+        }
+      }
+
+      // NOTE: this will retry pull until local RPC service becomes available, and
+      // will NOT retry on replication failure.
+      private def pullWithRetry(request: PullRequest): IO[ReplicationResult] =
+        replicatorClient
+          .pull(request, new Metadata)
+          .handleErrorWith(RPChelper.handleRpcErrorWithRetry(pullWithRetry(request)))
 
       def prepareOuptputs(outputs: Seq[FileEntry]): IO[Seq[Path]] =
         IO.pure(fileEntriesToPaths(outputs))
@@ -99,7 +148,8 @@ object JobRunner {
 
       def resolveFileSizes(entries: Seq[FileEntryMsg], ctx: FileStorage): IO[Seq[FileEntryMsg]] =
         entries.traverse { entry =>
-          ctx.fileSize(entry.path).map(size => entry.focus(_.size).replace(size))
+          val path = Directories.resolvePath(dirs, Path(entry.path))
+          ctx.fileSize(path.toString).map(size => entry.focus(_.size).replace(size))
         }
 
       override def getHandlers: Map[String, JobHandler] = handlers
@@ -109,10 +159,12 @@ object JobRunner {
       handlers: Map[String, JobHandler],
       dirs: Directories,
       ctx: FileStorage,
-      logger: SourceLogger
+      logger: SourceLogger,
+      replicatorClient: ReplicatorLocalServiceFs2Grpc[IO, Metadata],
+      stateR: Ref[IO, SharedState]
   ): IO[JobRunner] =
     for {
       _ <- Directories.ensureDirs(dirs, ctx)
-      jobRunner <- JobRunner(handlers, dirs, ctx, logger)
+      jobRunner <- JobRunner(handlers, dirs, ctx, logger, replicatorClient, stateR)
     } yield jobRunner
 }

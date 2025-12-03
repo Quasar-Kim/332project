@@ -34,8 +34,17 @@ class InMemoryFileStorage(ref: Ref[IO, Map[String, Array[Byte]]]) extends FileSt
     ref.update(fs => fs - path)
   }
 
+  override def deleteRecursively(path: String): IO[Unit] =
+    ref.update { state =>
+      val deletedFiles = state.keys.filter(_.startsWith(path))
+      state.removedAll(deletedFiles)
+    }
+
   override def exists(path: String): IO[Boolean] = {
-    ref.get.map(_.contains(path))
+    ref.get.map { state =>
+      state.contains(path) ||
+      state.keys.exists(k => k.startsWith(path + "/"))
+    }
   }
 
   override def rename(before: String, after: String): IO[Unit] = {
@@ -88,5 +97,11 @@ class InMemoryFileStorage(ref: Ref[IO, Map[String, Array[Byte]]]) extends FileSt
           new FileAlreadyExistsException(s"can't create directory because file $path exists")
         )
       } yield path
+    }
+
+  override def save(path: String, data: Stream[IO, Byte]): IO[Unit] =
+    // do not make temporary file here
+    data.compile.to(Array).flatMap { bytes =>
+      ref.update(fs => fs + (path -> bytes))
     }
 }

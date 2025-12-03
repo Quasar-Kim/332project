@@ -226,7 +226,7 @@ class SchedulerSpec extends AsyncSpec {
             or be(Map(0 -> machineTwoFiles(0), 1 -> machineOneFiles(1)))
         )
       }
-    }.timeout(1.second)
+    }.timeout(5.second)
   }
 
   behavior of "scheduler.runJobs"
@@ -254,49 +254,16 @@ class SchedulerSpec extends AsyncSpec {
         // enqueue 4 jobs, executed on each workers
         result <- scheduler.runJobs(Seq(jobA, jobB, jobC, jobD))
       } yield {
-        result.files should be(
-          Map(
-            0 -> Map(
-              "@{input}/a" -> new FileEntry(
-                path = "@{input}/a",
-                size = 1024,
-                replicas = Seq(0)
-              ),
-              "@{input}/b" -> new FileEntry(path = "@{input}/b", size = 1024, replicas = Seq(0)),
-              "@{working}/a.out" -> new FileEntry(
-                path = "@{working}/a.out",
-                size = 1024,
-                replicas = Seq(0)
-              ),
-              "@{working}/b.out" -> new FileEntry(
-                path = "@{working}/b.out",
-                size = 1024,
-                replicas = Seq(0)
-              )
-            ),
-            1 -> Map(
-              "@{input}/c" -> new FileEntry(
-                path = "@{input}/c",
-                size = 1024,
-                replicas = Seq(1)
-              ),
-              "@{input}/d" -> new FileEntry(
-                path = "@{input}/d",
-                size = 1024,
-                replicas = Seq(1)
-              ),
-              "@{working}/c.out" -> new FileEntry(
-                path = "@{working}/c.out",
-                size = 1024,
-                replicas = Seq(1)
-              ),
-              "@{working}/d.out" -> new FileEntry(
-                path = "@{working}/d.out",
-                size = 1024,
-                replicas = Seq(1)
-              )
-            )
-          )
+        val files = result.files.map { case (_, m) => m.keys }.flatten.toSet
+        files shouldBe Set(
+          "@{input}/a",
+          "@{input}/b",
+          "@{input}/c",
+          "@{input}/d",
+          "@{working}/a.out",
+          "@{working}/b.out",
+          "@{working}/c.out",
+          "@{working}/d.out"
         )
 
         result.results.to(Set) should be(

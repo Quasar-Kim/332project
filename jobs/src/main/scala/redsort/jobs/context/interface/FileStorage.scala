@@ -7,6 +7,10 @@ import fs2.{Stream, Pipe, Chunk}
 import fs2.io.file.{Files, Path}
 import java.io.FileNotFoundException
 import redsort.jobs.Common.FileEntry
+import java.nio.file.StandardCopyOption
+import fs2.io.file.CopyFlags
+import fs2.io.file.CopyFlag
+import cats.effect.kernel.Resource.ExitCase.Succeeded
 
 /** Operations on file storage.
   */
@@ -44,26 +48,36 @@ trait FileStorage {
     * @return
     *   resource wrapping pipe to the new file.
     */
-  def create(path: String): Resource[IO, Pipe[IO, Byte, Unit]] = {
+  def create(path: String): Pipe[IO, Byte, Unit] = { in =>
     val tempPath = s"$path.tmp"
 
     // use .attempt.void to supress error if the file was never created
     def deleteTemp = delete(tempPath).attempt.void
 
-    Resource.makeCase(IO(write(tempPath))) {
-      case (_, Resource.ExitCase.Succeeded) =>
-        rename(tempPath, path).onError(_ => deleteTemp)
-      case (_, _) =>
-        deleteTemp
-    }
+    in
+      .through(write(tempPath))
+      .onFinalizeCase {
+        case Succeeded => rename(tempPath, path).onError(_ => deleteTemp)
+        case _         => deleteTemp
+      }
   }
 
-  /** Delete file.
+  def save(path: String, data: Stream[IO, Byte]): IO[Unit]
+
+  /** Delete file or a directory.
     *
     * @param path
     *   absolute path to the file.
     */
   def delete(path: String): IO[Unit]
+
+  /** Delete possibly nonempty directory recursively.
+    *
+    * @param path
+    *   absolute path to the file.
+    * @return
+    */
+  def deleteRecursively(path: String): IO[Unit]
 
   /** Check if file exists.
     *
@@ -110,13 +124,11 @@ trait FileStorage {
     *   contents of file as a array of bytes.
     */
   def writeAll(path: String, data: Array[Byte]): IO[Unit] =
-    create(path).use { sink =>
-      Stream
-        .chunk(Chunk.array(data))
-        .through(sink)
-        .compile
-        .drain
-    }
+    Stream
+      .chunk(Chunk.array(data))
+      .through(create(path))
+      .compile
+      .drain
 
   /** Make a directory.
     *

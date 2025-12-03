@@ -22,6 +22,7 @@ import redsort.jobs.scheduler.SchedulerFiberEvents.Complete
 import redsort.jobs.scheduler.SchedulerFiberEvents.WorkerCompleted
 import redsort.jobs.messages.WorkerHello
 import redsort.jobs.messages.NetAddrMsg
+import scala.collection.immutable
 
 /** Scheduler fiber.
   */
@@ -221,15 +222,14 @@ object SchedulerFiber {
                 case None => throw new Unreachable
               }
             })
-            _ <- IO(
-              logger.info(
-                s"$from completed job. pending: ${updatedState.schedulerFiber.workers(from).pendingJobs.length}, completed: ${updatedState.schedulerFiber.workers(from).completedJobs.length}"
-              )
+            _ <- logger.info(
+              s"$from completed job. pending: ${updatedState.schedulerFiber.workers(from).pendingJobs.length}, completed: ${updatedState.schedulerFiber.workers(from).completedJobs.length}"
             )
 
             // if all jobs are completed,
             //   - update file entries of each machine.
             //   - send JobCompleted event to main fiber.
+            //   - empty completed job list.
             // otherwise submit another job into workers.
             done <- IO.pure(updatedState.schedulerFiber.workers.forall { case (_, state) =>
               state.pendingJobs.isEmpty && state.runningJob.isEmpty
@@ -238,13 +238,15 @@ object SchedulerFiber {
               if (done) {
                 for {
                   _ <- logger.info("all jobs completed")
-                  updatedState <- IO.pure(updateFileEntries(updatedState))
+                  updatedState <- updateFileEntries(updatedState)
+                  _ <- stateR.set(updatedState)
                   _ <- mainFiberQueue.offer(
                     new MainFiberEvents.JobCompleted(
                       jobResults(updatedState.schedulerFiber.workers),
                       updatedState.schedulerFiber.files
                     )
                   )
+                  updatedState <- IO.pure(emptyCompletedJobs(updatedState))
                   _ <- stateR.set(
                     updatedState
                       .focus(_.schedulerFiber.state)
@@ -268,7 +270,7 @@ object SchedulerFiber {
 
     case JobFailed(result, from) => {
       for {
-        _ <- logger.error(s"$from failed to run job, reason: ${result.error.get.inner.get.message}")
+        _ <- logger.error(s"$from failed to run job, reason: ${result.error}")
         spec <- stateR.get.map(_.schedulerFiber.workers(from).runningJob.get.spec)
         _ <- mainFiberQueue.offer(new MainFiberEvents.JobFailed(spec = spec, result = result))
       } yield ()
@@ -336,41 +338,68 @@ object SchedulerFiber {
       }
   }
 
-  def updateFileEntries(state: SharedState): SharedState = {
-    // for each machine, collect all completed jobs.
-    val completedJobsPerMachine = state.schedulerFiber.workers
-      .groupBy(_._1.mid)
-      .view
-      .mapValues(m =>
-        m.collect[Seq[Job]] { case (wid, state) => state.completedJobs.toSeq }.flatten
-      )
+  def updateFileEntries(state: SharedState): IO[SharedState] = {
+    // Collect all completed jobs.
+    val completedJobs = state.schedulerFiber.workers.foldLeft(Seq.empty[Job]) {
+      case (acc, (wid, state)) =>
+        acc ++ state.completedJobs.to(Seq)
+    }
+    val completedJobsMap = state.schedulerFiber.workers.view
+      .filterKeys(_.wtid == 0)
+      .map { case (wid, _) => (wid.mid, completedJobs) }
       .to(Map)
 
-    // collect deleted and added intemrediate files.
-    val deletedFiles = completedJobsPerMachine.view
-      .mapValues { jobs =>
-        jobs.map(_.spec.inputs.map(_.path).filter(_.startsWith("@{working}"))).flatten.to(Seq)
-      }
-      .to(Map)
-    val addedFileEntries = completedJobsPerMachine.view
-      .mapValues { jobs =>
-        jobs
-          .map(_.result.get.outputs.map(entryMsg => (entryMsg.path, FileEntry.fromMsg(entryMsg))))
-          .flatten
-          .to(Map)
-      }
-      .to(Map)
+    // collect files to be deleted and added intemrediate files.
+    val obsoleteFiles = completedJobsMap.map { case (mid, jobs) =>
+      val files = jobs
+        .map(
+          _.spec.inputs
+            .filter(entry => entry.path.startsWith("@{working}") && entry.replicas.contains(mid))
+            .map(_.path)
+        )
+        .flatten
+        .to(Seq)
+      (mid, files)
+    }
+    val addedFileEntries = completedJobsMap.map { case (mid, jobs) =>
+      val files = jobs
+        .map(
+          _.result.get.outputs
+            .filter(_.replicas.contains(mid))
+            .map(entryMsg => (entryMsg.path, FileEntry.fromMsg(entryMsg)))
+        )
+        .flatten
+        .filter { case (path, _) =>
+          path != "@{working}/synced"
+        } // do not track "synced" file procued by __sync__ job
+        .to(Map)
+      (mid, files)
+    }
 
     // apply changes to files
     val files =
       state.schedulerFiber.files
-        .lazyZip(deletedFiles)
-        .lazyZip(addedFileEntries)
-        .map { case ((mid, entries), (_, deletions), (_, additions)) =>
+        .map { case (mid, entries) =>
+          val deletions = obsoleteFiles(mid)
+          val additions = addedFileEntries(mid)
           (mid, entries.removedAll(deletions).concat(additions))
         }
         .to(Map)
-    state.focus(_.schedulerFiber.files).replace(files)
+
+    // log debug informations
+    val addedFiles = addedFileEntries.view.mapValues(_.keys.toSeq).toMap
+    for {
+      _ <- logger.debug(s"new files: ${addedFiles}")
+      _ <- logger.debug(s"obsolete files: $obsoleteFiles")
+    } yield state.focus(_.schedulerFiber.files).replace(files)
+  }
+
+  def emptyCompletedJobs(state: SharedState): SharedState = {
+    state.focus(_.schedulerFiber.workers).modify { workerStates =>
+      workerStates.view.mapValues { case workerState =>
+        workerState.focus(_.completedJobs).replace(immutable.Queue.empty)
+      }.toMap
+    }
   }
 
   def jobResults(workerStates: Map[Wid, WorkerState]): Seq[Tuple2[JobSpec, JobResult]] =
@@ -387,9 +416,11 @@ object SchedulerFiber {
       case Some(entry) => Some(entry._1) // already registered, just return its wid
       case None        => {
         // new worker registration, try finding empty wid
-        val newEntryOption = workerStates.filter(_._1.wtid == hello.wtid).find { case (_, state) =>
-          !state.initialized
-        }
+        val newEntryOption =
+          workerStates.filter(_._1.wtid == hello.wtid).toSeq.sortBy(_._1.mid).find {
+            case (_, state) =>
+              !state.initialized
+          }
         newEntryOption match {
           case Some(newEntry) => Some(newEntry._1)
           case None           => None // invalid registration

@@ -18,14 +18,14 @@ import monocle.syntax.all._
 import org.log4s._
 import redsort.jobs.SourceLogger
 import scala.redsort.jobs.worker.handler.SyncJobHandler
+import java.nio.file.FileAlreadyExistsException
+import redsort.jobs.replicator.Replicator
 
 trait Worker {
   def waitForComplete: IO[Unit]
 }
 
 object Worker {
-  private[this] val logger = new SourceLogger(getLogger, "worker")
-
   def apply(
       handlerMap: Map[String, JobHandler],
       masterAddr: NetAddr,
@@ -33,28 +33,61 @@ object Worker {
       outputDirectory: Path,
       wtid: Int,
       port: Int,
-      ctx: WorkerCtx
-  ): Resource[IO, Worker] =
+      ctx: WorkerCtx,
+      replicatorLocalPort: Int,
+      replicatorRemotePort: Int,
+      workingDirectory: Option[Path] = None
+  )(
+      program: Worker => IO[Unit]
+  )(implicit logger: SourceLogger = new SourceLogger(getLogger, "worker")): IO[Unit] =
     for {
       // initialize state
-      stateR <- SharedState.init.toResource
-      handlerMap <- IO.pure(handlerMap.updated("__sync__", SyncJobHandler)).toResource
+      stateR <- SharedState.init
+      handlerMap <- IO.pure(handlerMap.updated("__sync__", SyncJobHandler))
+      completed <- IO.deferred[Unit]
 
       // create a temporary directory and use it as a working directory
-      workingDirectory <- createWorkingDir(ctx).toResource
+      workDir <- workingDirectory match {
+        case Some(dir) => IO.pure(dir)
+        case None      => getWorkingDir(outputDirectory)
+      }
       dirs <- Directories
         .init(
           inputDirectories = inputDirectories,
           outputDirectory = outputDirectory,
-          workingDirectory = workingDirectory
+          workingDirectory = workDir
         )
-        .toResource
+      _ <- IO.whenA(wtid == 0)(
+        logger.info(s"input directories: ${inputDirectories.map(_.toString).mkString(", ")}") >>
+          logger.info(s"working directory: ${workDir.toString}") >>
+          logger.info(s"output directory: ${outputDirectory.toString}")
+      )
 
-      // start RPC server on the background
-      supervisor <- Supervisor[IO]
-      completed <- IO.deferred[Unit].toResource
-      _ <- Resource.eval {
-        supervisor.supervise(
+      // replicator service (only on wtid == 0)
+      replciatorFiber =
+        if (wtid == 0)
+          startReplicator(
+            stateR = stateR,
+            ctx = ctx,
+            dirs = dirs,
+            localPort = replicatorLocalPort,
+            remotePort = replicatorRemotePort
+          ).flatMap(_ => logger.error("replicator exited prematurely"))
+        else
+          IO.never[Unit]
+
+      // worker object passed to user program
+      worker = new Worker {
+        override def waitForComplete: IO[Unit] =
+          completed.get
+      }
+      // user program
+      programFiber = program(worker).flatMap(_ => logger.debug("user program exited"))
+
+      // RPC server fiber
+      serverFiber = ctx
+        .replicatorLocalRpcClient(new NetAddr("127.0.0.1", replicatorLocalPort))
+        .use { replicatorClient =>
           WorkerServerFiber
             .start(
               stateR = stateR,
@@ -63,29 +96,88 @@ object Worker {
               dirs = dirs,
               ctx = ctx,
               logger = logger,
-              completed = completed
+              completed = completed,
+              replicatorClient = replicatorClient
             )
             .useForever
-        )
+            .flatMap(_ => logger.error("server fiber exited prematurely"))
+        }
+
+      _ <- logger.info(
+        s"connecting to scheduler server at ${masterAddr.ip}:${masterAddr.port}"
+      )
+
+      _ <- ctx.schedulerRpcClient(masterAddr).use { schedulerClient =>
+        for {
+          // wait for registration
+          _ <- logger.info(
+            s"worker (port=$port, wtid=$wtid) connected to scheduler server, waiting for registration..."
+          )
+          _ <- registerWorkerToScheduler(schedulerClient, stateR, wtid, port, dirs, ctx)
+          wid <- stateR.get.map(s => s.wid.get)
+          _ <- logger.debug(s"${wid}: working directory ${workDir}")
+
+          // start fibers concurrently with user program
+          backgroundFiber = (serverFiber, replciatorFiber).parTupled
+          _ <- programFiber.race(backgroundFiber)
+        } yield ()
       }
 
-      // retrieve scheduler RPC client
-      // this will block until connection establishes
-      schedulerClient <- ctx.schedulerRpcClient(masterAddr)
+      // start RPC server on the background
+      // serverFiber = ctx
+      //   .replicatorLocalRpcClient(new NetAddr("127.0.0.1", replicatorLocalPort))
+      //   .use { replicatorClient =>
+      //     WorkerServerFiber
+      //       .start(
+      //         stateR = stateR,
+      //         port = port,
+      //         handlers = handlerMap,
+      //         dirs = dirs,
+      //         ctx = ctx,
+      //         logger = logger,
+      //         completed = completed,
+      //         replicatorClient = replicatorClient
+      //       )
+      //       .useForever
+      //       .flatMap(_ => logger.error("server fiber exited prematurely"))
+      //   }
 
-      // registration worker
-      wid <- registerWorkerToScheduler(schedulerClient, stateR, wtid, port, dirs, ctx).toResource
-    } yield new Worker {
-      override def waitForComplete: IO[Unit] =
-        completed.get
-    }
+      // worker = new Worker {
+      //   override def waitForComplete: IO[Unit] =
+      //     completed.get
+      // }
 
-  def createWorkingDir(ctx: FileStorage): IO[Path] = {
-    for {
-      timestamp <- IO(LocalDateTime.now.format(DateTimeFormatter.ofPattern("YYYYMMdd_HHmmss")))
-      path <- IO(Path(System.getProperty("user.dir")) / s"redsort-working-$timestamp")
-      _ <- ctx.mkDir(path.toString)
-    } yield path
+      // mainFiber = ctx
+      //   .schedulerRpcClient(masterAddr)
+      //   .use(schedulerClient =>
+      //     for {
+      //       _ <- registerWorkerToScheduler(schedulerClient, stateR, wtid, port, dirs, ctx)
+      //       wid <- stateR.get.map(s => s.wid.get)
+      //       _ <- logger.debug(s"${wid}: working directory ${workDir}")
+      //       replicatorIO =
+      //         if (wtid == 0)
+      //           startReplicator(
+      //             stateR = stateR,
+      //             ctx = ctx,
+      //             dirs = dirs,
+      //             localPort = replicatorLocalPort,
+      //             remotePort = replicatorRemotePort
+      //           )
+      //         else
+      //           IO.never[Unit]
+      //             .flatMap(_ => logger.error("replicator exited prematurely"))
+      //       programIO = program(worker).flatMap(_ => logger.debug("user program exited"))
+      //       _ <- programIO.race(replicatorIO)
+      //     } yield ()
+      //   )
+
+      // _ <- serverFiber.race(mainFiber)
+      _ <- logger.info(s"worker (wtid: $wtid) done, running finalization")
+      _ <- IO.whenA(wtid == 0)(finalize(dirs, ctx))
+    } yield ()
+
+  def getWorkingDir(outputDirectory: Path): IO[Path] = {
+    IO.pure(outputDirectory / "redsort-working")
   }
 
   def registerWorkerToScheduler(
@@ -95,7 +187,7 @@ object Worker {
       port: Int,
       dirs: Directories,
       ctx: WorkerCtx
-  ): IO[Unit] =
+  )(implicit logger: SourceLogger = new SourceLogger(getLogger, "worker")): IO[Unit] =
     for {
       state <- stateR.get
 
@@ -131,6 +223,24 @@ object Worker {
       }
     } yield ()
 
+  def startReplicator(
+      stateR: Ref[IO, SharedState],
+      ctx: WorkerCtx,
+      dirs: Directories,
+      localPort: Int,
+      remotePort: Int
+  )(implicit logger: SourceLogger = new SourceLogger(getLogger, "worker")): IO[Unit] =
+    for {
+      state <- stateR.get
+      _ <- Replicator.start(
+        replicatorAddrs = state.replicatorAddrs,
+        ctx = ctx,
+        dirs = dirs,
+        localPort = localPort,
+        remotePort = remotePort
+      )
+    } yield ()
+
   def getStorageInfo(dirs: Directories, ctx: FileStorage): IO[LocalStorageInfo] =
     for {
       entries <- dirs.inputDirectories.traverse(inputDir =>
@@ -147,4 +257,12 @@ object Worker {
       remainingStorage = -1,
       entries = entries.flatten.toMap
     )
+
+  def finalize(dirs: Directories, ctx: FileStorage)(implicit
+      logger: SourceLogger = new SourceLogger(getLogger, "worker")
+  ): IO[Unit] =
+    for {
+      _ <- logger.debug("cleaning working directory")
+      _ <- ctx.deleteRecursively(dirs.workingDirectory.toString)
+    } yield ()
 }

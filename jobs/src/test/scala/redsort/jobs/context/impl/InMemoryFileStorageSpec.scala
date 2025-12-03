@@ -80,6 +80,22 @@ class InMemoryFileStorageSpec extends AsyncSpec {
     }
   }
 
+  it should "delete nonempty directory" in {
+    val dirPath = "/tmp/deleteMe/"
+    val path = dirPath + "a"
+    val content = "hello".getBytes
+
+    withStorage { storage =>
+      for {
+        _ <- storage.writeAll(path, content)
+        _ <- storage.deleteRecursively(dirPath)
+        exists <- storage.exists(path)
+      } yield {
+        exists shouldBe false
+      }
+    }
+  }
+
   it should "rename a file correctly" in {
     val beforePath = "/tmp/test/before.txt"
     val afterPath = "/tmp/test/after.txt"
