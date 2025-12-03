@@ -15,8 +15,12 @@ usage() {
     echo "Execute the commands provided by the edge case scripts."
     echo ""
     echo "Available edge cases:"
-    echo "empty.sh -- input is contains or entirely consists of empty files/directories"
-    echo "..."
+    echo "empty.sh -- input contains or entirely consists of empty files/directories"
+    echo "size-count.sh -- experimenting with tiny and giant files"
+    echo "ranges.sh -- no shufflig or keys on the cusp of ranges"
+    echo "skew.sh -- differently skewed or distributed data"
+    echo "duplicates.sh -- identical files or files with only identical records"
+    echo "binary.sh -- binary data instead of ASCII"
 }
 
 master() {

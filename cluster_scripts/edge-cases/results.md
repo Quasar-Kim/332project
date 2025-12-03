@@ -23,8 +23,8 @@ io.grpc.StatusRuntimeException: INTERNAL: input size must be 1
 
 ## File
 Empty input file: file exists but contains no records.
-*Wanted behaviour*: producing no partitions (or empty one(s)?)
-**Success (?)**: 1 machine, 1 directory with 1 empty file. Results in no partition file (but also no crash).
+*Wanted behaviour*: producing no partitions.
+**Success**: 1 machine, 1 directory with 1 empty file. Results in no partition file (but also no crash).
 
 ## Mix
 Mix of empty/non-empty direcotries and files.
@@ -39,27 +39,75 @@ Mix of empty/non-empty direcotries and files.
 Results in a single partition file with 1000 records (corectly sorted).
 (tried giving both the empty and non-empty directory first -- result is the same)
 
-# File size and number of files
+# File size and file count
+## Tiny input file
+There is a very small number of records (e.g., 10).
+**Success**. Tried:
+- 1 machine, 1 directory, 1 file with 10 records (```./size-count.sh 1 1 1 10```)
+- 2 machines, 3 directories, 4 files with 5 records, i.e., 120 records split between 24 files (```./size-count.sh 2 3 4 5```)
+
+## Data heavily split into small files
+For example, instead of 2 files with 320_000 records each, it is 20000 files with 32 records each.
+Tried:
+**Success**. Tried:
+- 3 machines, 1 directory, 1000 files with 10 records, i.e., 30_000 records (3 MB) split between 3000 files.
+Results in 3 partition files (9000, 9000, and 12000 records); all are sorted correctly, and no records are lost.
+
+## Giant input file
+All input data is in 1 file.
+- 1 machine, 1 file with 2_560_000 records (256 MB)
+Results in 2 partition files (1_280_000 records each) sorted correctly.
+
+## Multiple giant input files
+A few files, but all are large.
 TODO
-    - Tiny input file: very small number of records (e.g., 10)
-    - Data heavily split into small files: e.g., instead of 2 files with 320_000 records each, it is 20000 files with 32 records each
-    - Giant input file: all input data is in 1 file
-    - Multiple giant input files: few files, but all are large
 
 # Partition ranges
-TODO
-    - Partition from the start: the input boundaries on different workers are disjoint from the start, e.g., ```vm01``` has the largest key ```K```, and the smallest key in the input on ```vm02``` is larger than ```K```
-    - Records on partition boundary: dealing with keys that are exactly on the cusp of the partition ranges
+## Disjoint input
+The input ranges on different workers are disjoint from the start, e.g., ```vm01``` has the largest key ```K```, and the smallest key in the input on ```vm02``` is larger than ```K```.
+
+## "Cusper" records
+Some keys that are exactly on the cusp of the partition ranges, e.g., the range assigned to ```vm01``` is ```[0,K]``` for some key ```K``` and the input (on any machine) contains a record with key ```K```.
 
 # Skeweness and distribution
-TODO
-    - Skewed towards the start: many "AAA..."
-    - Skewed towads the end: many "ZZZ..."
-    - Uneven distribution: large percentage share a prefix
+## Skewed towards the start
+E.g., many "AAA..."
+
+## Skewed towads the end
+E.g., many "ZZZ..."
+
+## Uneven distribution
+E.g., a large portion of records share a prefix.
 
 # Duplicates
-TODO
-    - All identical keys: all the same in some or all files
-    - All identical files: identical input sets on each machine
+## Identical files
+All input files are identical.
+**Success**: 3 machines, 3 directories, 3 files with 300 records, i.e., 9 identical files overall (```./duplicates.sh files 3 3 3 300```)
 
-TODO ascii vs binary input
+## Identical file sets
+The file sets on each machine are the same.
+**Success**: 2 machines, 2 directories, 2 files with 2000 records, where the input directory pairs on ```vm01``` and ```vm02``` are identical (```./duplicates.sh sets 2 2 2 2000```).
+
+## Mix
+Some files and file sets are identical, some are not.
+**Success**: the input data is as follows (with ```./duplicates.sh mix 4 2 2 3 2 1000```):
+```
+vm01:
++-dir0
+  +-file0
+  +-file1   <-- copy of file0
+  +-file2   <-- copy of file0
+  +-file3
+  +-file4
++-dir1
+  +-file0   <-- copy of ../dir0/file0
+  +-file1   <-- copy of ../dir0/file0
+  +-file2   <-- copy of ../dir0/file0
+  +-file3
+  +-file4
+```
+This set is copied to ```vm02```, while ```vm03``` and ```vm04``` have sets that are indepentdent of this one (each also with 2 directories with 5 files, each with 1000 records).
+
+# Binary records
+The data is binary instead of ASCII.
+**Success**: 4 machines, 5 directories, 6 files per directory, 7000 *binary* records per file (840_000 records in total).
