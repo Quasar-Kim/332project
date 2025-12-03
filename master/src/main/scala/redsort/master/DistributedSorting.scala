@@ -156,7 +156,7 @@ object DistributedSorting {
               new FileEntry(
                 path = s"@{working}/partition.$n.$i",
                 size = -1,
-                replicas = fileEntry.replicas
+                replicas = Seq(mid)
               )
             }
           )
