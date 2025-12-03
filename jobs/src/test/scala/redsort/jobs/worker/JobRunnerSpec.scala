@@ -207,8 +207,8 @@ class JobRunnerSpec extends AsyncSpec {
 
   it should "pull missing files from other machines" in {
     val f = fixture
-    val filename = "@{output}/files/missing"
-    (f.fileIO.exists _).returns(name => IO.pure(name != filename))
+    val filename = "@{working}/files/missing"
+    (f.fileIO.exists _).returns(name => IO.pure(name != "/root/working/files/missing"))
     (f.handlerStub.apply _).returnsWith(IO.pure(None))
     val helloSpec = f.helloSpec
       .focus(_.inputs)
@@ -233,9 +233,9 @@ class JobRunnerSpec extends AsyncSpec {
 
   it should "pull missing files from other machines even if replicas field is wrong" in {
     val f = fixture
-    val filename = "@{output}/files/missing"
+    val filename = "@{working}/files/missing"
     // file is not available in this machine
-    (f.fileIO.exists _).returns(name => IO.pure(name != filename))
+    (f.fileIO.exists _).returns(name => IO.pure(name != "/root/working/files/missing"))
     (f.handlerStub.apply _).returnsWith(IO.pure(None))
     val helloSpec = f.helloSpec
       .focus(_.inputs)
@@ -262,8 +262,8 @@ class JobRunnerSpec extends AsyncSpec {
 
   it should "return failed result if all pull fails" in {
     val f = fixture
-    val filename = "@{output}/files/missing"
-    (f.fileIO.exists _).returns(name => IO.pure(name != filename))
+    val filename = "@{working}/files/missing"
+    (f.fileIO.exists _).returns(name => IO.pure(name != "/root/working/files/missing"))
     (f.replicatorStub.pull _)
       .returnsWith(IO.raiseError[ReplicationResult](new IllegalArgumentException("some error")))
     val helloSpec = f.helloSpec
@@ -301,15 +301,31 @@ class JobRunnerSpec extends AsyncSpec {
       case 2 => IO.pure(ReplicationResult(success = true))
       case _ => IO.raiseError(new IllegalArgumentException("some error"))
     }
+    val helloSpec = JobSpec.toMsg(
+      new JobSpec(
+        name = "hello",
+        args = Seq(new StringArg("hello")),
+        inputs = Seq(),
+        outputs = Seq(
+          new FileEntry(
+            path = "@{working}/files/c",
+            size = 1024,
+            replicas = Seq(0)
+          )
+        )
+      )
+    )
 
     for {
       runner <- f.getJobRunner()
-      result <- runner.runJob(f.helloSpec)
+      result <- runner.runJob(helloSpec)
     } yield {
       assume(result.success)
 
       (f.replicatorStub.push _).calls.length shouldBe 2
-      (f.replicatorStub.push _).calls.map(_._1.path).toSet shouldBe Set.fill(2)("@{output}/files/c")
+      (f.replicatorStub.push _).calls.map(_._1.path).toSet shouldBe Set.fill(2)(
+        "@{working}/files/c"
+      )
       (f.replicatorStub.push _).calls.map(_._1.dst).toSet.size shouldBe 2
       result.outputs(0).replicas.length shouldBe 2
     }
@@ -318,10 +334,24 @@ class JobRunnerSpec extends AsyncSpec {
   it should "not replicate output file if there is only one machine" in {
     val f = fixture
     (f.handlerStub.apply _).returnsWith(IO.pure(None))
+    val helloSpec = JobSpec.toMsg(
+      new JobSpec(
+        name = "hello",
+        args = Seq(new StringArg("hello")),
+        inputs = Seq(),
+        outputs = Seq(
+          new FileEntry(
+            path = "@{working}/files/c",
+            size = 1024,
+            replicas = Seq(0)
+          )
+        )
+      )
+    )
 
     for {
       runner <- f.getJobRunner(Map(0 -> f.replicatorAddrs(0)))
-      result <- runner.runJob(f.helloSpec)
+      result <- runner.runJob(helloSpec)
     } yield {
       assume(result.success)
 
@@ -330,14 +360,65 @@ class JobRunnerSpec extends AsyncSpec {
     }
   }
 
+  it should "only replicate output files in working directory" in {
+    val f = fixture
+    (f.handlerStub.apply _).returnsWith(IO.pure(None))
+    (f.replicatorStub.push _).returnsWith(IO.pure(ReplicationResult(success = true)))
+    val helloSpec = JobSpec.toMsg(
+      new JobSpec(
+        name = "hello",
+        args = Seq(new StringArg("hello")),
+        inputs = Seq(),
+        outputs = Seq(
+          new FileEntry(
+            path = "@{working}/files/c",
+            size = 1024,
+            replicas = Seq(0)
+          ),
+          new FileEntry(
+            path = "@{output}/files/d",
+            size = 1024,
+            replicas = Seq(0)
+          )
+        )
+      )
+    )
+
+    for {
+      runner <- f.getJobRunner()
+      result <- runner.runJob(helloSpec)
+    } yield {
+      assume(result.success)
+
+      (f.replicatorStub.push _).calls.length shouldBe 1
+      (f.replicatorStub.push _).calls(0)._1.path shouldBe "@{working}/files/c"
+      result.outputs.find(_.path == "@{working}/files/c").get.replicas.length shouldBe 2
+      result.outputs.find(_.path == "@{output}/files/d").get.replicas shouldBe Seq(0)
+    }
+  }
+
   it should "return failed result of output push fails" in {
     val f = fixture
     (f.handlerStub.apply _).returnsWith(IO.pure(None))
     (f.replicatorStub.push _).returnsWith(IO.raiseError(new IllegalArgumentException("some error")))
+    val helloSpec = JobSpec.toMsg(
+      new JobSpec(
+        name = "hello",
+        args = Seq(new StringArg("hello")),
+        inputs = Seq(),
+        outputs = Seq(
+          new FileEntry(
+            path = "@{working}/files/c",
+            size = 1024,
+            replicas = Seq(0)
+          )
+        )
+      )
+    )
 
     for {
       runner <- f.getJobRunner()
-      result <- runner.runJob(f.helloSpec)
+      result <- runner.runJob(helloSpec)
     } yield {
       result.success shouldBe false
       result.error.get.kind shouldBe WorkerErrorKind.OUTPUT_REPLICATION_ERROR

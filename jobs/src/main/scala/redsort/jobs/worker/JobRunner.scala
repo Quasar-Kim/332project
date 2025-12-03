@@ -164,14 +164,18 @@ object JobRunner {
       }
 
       def replicateOutputs(entries: Seq[FileEntryMsg], ctx: FileStorage): IO[Seq[FileEntryMsg]] =
-        entries.traverse { entry =>
-          for {
-            candidates <- replicationDstCandidates
-            replicatedEntry <-
-              if (candidates.isEmpty) IO.pure(entry)
-              else tryPush(entry, candidates)
-          } yield replicatedEntry
-        }
+        entries
+          .traverse { entry =>
+            // only replicate files in working directory
+            if (entry.path.startsWith("@{working}")) {
+              for {
+                candidates <- replicationDstCandidates
+                replicatedEntry <-
+                  if (candidates.isEmpty) IO.pure(entry)
+                  else tryPush(entry, candidates)
+              } yield replicatedEntry
+            } else IO.pure(entry)
+          }
 
       def replicationDstCandidates: IO[List[Mid]] =
         stateR.get.flatMap { s =>
