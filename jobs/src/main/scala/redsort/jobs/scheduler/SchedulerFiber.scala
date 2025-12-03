@@ -249,13 +249,12 @@ object SchedulerFiber {
     ): IO[SharedState] = {
       for {
         _ <- logger.debug(s"existing worker re-registration with wid $wid")
-        updatedState <- IO.pure(initializeWorkerState(state, wid, hello))
         _ <- rpcServerFiberQueue.offer(
           new RpcServerFiberEvents.AllWorkersInitialized(
-            getReplicatorAddresses(updatedState.schedulerFiber.workers)
+            getReplicatorAddresses(state.schedulerFiber.workers)
           )
         )
-      } yield updatedState
+      } yield state
     }
 
     def handleInvalidRegistration(state: SharedState, hello: WorkerHello): IO[SharedState] = {
@@ -359,13 +358,15 @@ object SchedulerFiber {
 
         2. Existing worker registers again - `WorkerRegistrationCases.Existing`
 
-        In case 1-a) and 2, scheduler resolves worker ID for the worker and
-        initialize its state according to workerHello from the worker.
+        In case 1-a), scheduler resolves worker ID for the worker and initialize its state according to
+        workerHello from the worker.
 
         In case 1-b), scheduler rejects registration by sending back "bad schedulerHello"
         (schedulerHello message with `success` field set to false).
 
-        `SchedulerFiber` sends `AllWorkersInitialized` in either case 1-b) and 2.
+        In case 2, worker state is NOT updated and successful schedulerHello is sent back.
+
+        `SchedulerFiber` sends `AllWorkersInitialized` to `RpcServerFiber `in either case 1-b) and 2.
         `RpcServerFiber` will send back appropriate schedulerHello for each case.
        */
       case WorkerRegistration(hello) =>

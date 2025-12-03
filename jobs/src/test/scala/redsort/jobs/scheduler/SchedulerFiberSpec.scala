@@ -290,7 +290,9 @@ class SchedulerFiberSpec extends AsyncSpec {
         } yield {
           val workerState = state.schedulerFiber.workers(new Wid(0, 0))
           workerState.initialized shouldBe (true)
-          state.schedulerFiber.files(0).keySet shouldBe Set("@{working}/x", "@{working}/y")
+
+          // file entries should not be updated
+          state.schedulerFiber.files(0).keySet shouldBe Set("@{working}/a.in", "@{working}/b.in")
         }
       }
       .timeout(1.second)
