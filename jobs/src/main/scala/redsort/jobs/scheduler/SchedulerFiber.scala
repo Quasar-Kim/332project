@@ -158,7 +158,7 @@ object SchedulerFiber {
           )
           .flatten
           .filter { case (path, _) =>
-            path != "@{working}/synced"
+            !path.startsWith("@{working}/synced.")
           } // do not track "synced" file procued by __sync__ job
           .to(Map)
         (mid, files)
