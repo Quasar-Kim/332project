@@ -8,22 +8,6 @@ DIR_INPUT="/home/red/edge_case_input/empty"
 DIR_SUMMARIES="/home/red/edge_case_summaries/empty"
 GENSORT_PATH="/home/red/gensort"
 
-test_id() {
-    # determine highest text idx (through vm01)
-    highest=$(ssh $USER@${WORKER_IPS[0]} "
-        dirs=($DIR_INPUT/$TYPE/test*[0-9])
-        if [ \${#dirs[@]} -eq 0 ]; then
-            echo 0
-        else
-            for d in \"\${dirs[@]}\"; do
-                echo \"\${d#test}\"
-            done | sort -n | tail -1
-        fi
-    ")
-
-    echo "Highest index = $highest"
-}
-
 generate_commands() {
     local inp_str=$1
     local out_str=$2
@@ -162,7 +146,7 @@ mix() {
     # remove trailing space
     dir_string=${dir_string% }
 
-    local rec_cnt=$(( $records * $filled_files * $filled_dirs ))
+    local rec_cnt=$(( $records * $filled_files * $filled_dirs * $N ))
     
     generate_commands "$dir_string" "$out_dir" "$DIR_SUMMARIES/$TYPE/$N-machines/$n_dirs-$n_files" $rec_cnt
 }
