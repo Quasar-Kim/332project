@@ -26,8 +26,6 @@ trait Worker {
 }
 
 object Worker {
-  private[this] val logger = new SourceLogger(getLogger, "worker")
-
   def apply(
       handlerMap: Map[String, JobHandler],
       masterAddr: NetAddr,
@@ -39,7 +37,9 @@ object Worker {
       replicatorLocalPort: Int,
       replicatorRemotePort: Int,
       workingDirectory: Option[Path] = None
-  )(program: Worker => IO[Unit]): IO[Unit] =
+  )(
+      program: Worker => IO[Unit]
+  )(implicit logger: SourceLogger = new SourceLogger(getLogger, "worker")): IO[Unit] =
     for {
       // initialize state
       stateR <- SharedState.init
@@ -187,7 +187,7 @@ object Worker {
       port: Int,
       dirs: Directories,
       ctx: WorkerCtx
-  ): IO[Unit] =
+  )(implicit logger: SourceLogger = new SourceLogger(getLogger, "worker")): IO[Unit] =
     for {
       state <- stateR.get
 
@@ -229,7 +229,7 @@ object Worker {
       dirs: Directories,
       localPort: Int,
       remotePort: Int
-  ): IO[Unit] =
+  )(implicit logger: SourceLogger = new SourceLogger(getLogger, "worker")): IO[Unit] =
     for {
       state <- stateR.get
       _ <- Replicator.start(
@@ -258,7 +258,9 @@ object Worker {
       entries = entries.flatten.toMap
     )
 
-  def finalize(dirs: Directories, ctx: FileStorage): IO[Unit] =
+  def finalize(dirs: Directories, ctx: FileStorage)(implicit
+      logger: SourceLogger = new SourceLogger(getLogger, "worker")
+  ): IO[Unit] =
     for {
       _ <- logger.debug("cleaning working directory")
       _ <- ctx.deleteRecursively(dirs.workingDirectory.toString)
