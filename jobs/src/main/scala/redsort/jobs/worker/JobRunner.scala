@@ -128,14 +128,14 @@ object JobRunner {
 
       def tryPull(entry: FileEntry, sources: Seq[Mid]): IO[Unit] = {
         sources match {
-          case Nil =>
+          case Seq() =>
             logger.error(s"failed to pull missing file $entry") >>
               IO.raiseError(
                 WorkerErrorWrapper(
                   WorkerError(kind = WorkerErrorKind.INPUT_REPLICATION_ERROR, inner = None)
                 )
               )
-          case head :: tail => {
+          case head +: tail => {
             val request = new PullRequest(path = entry.path, src = head)
             pullWithRetry(request).attempt.flatMap {
               case Left(err) => tryPull(entry, tail)
@@ -185,18 +185,21 @@ object JobRunner {
 
       def tryPush(entry: FileEntryMsg, dstCandidates: Seq[Mid]): IO[FileEntryMsg] =
         dstCandidates match {
-          case Nil =>
+          case Seq() =>
             logger.error(s"failed to push output file ${entry.path}") >>
               IO.raiseError(
                 WorkerErrorWrapper(
                   WorkerError(kind = WorkerErrorKind.OUTPUT_REPLICATION_ERROR, inner = None)
                 )
               )
-          case mid :: nextCandidates => {
+          case mid +: nextCandidates => {
             val request = PushRequest(path = entry.path, dst = mid)
             pushWithRetry(request).attempt.flatMap {
               case Left(err) => tryPush(entry, nextCandidates)
-              case Right(_)  => IO.pure(entry.focus(_.replicas).modify(_.appended(mid)))
+              case Right(_)  =>
+                logger.debug(s"pushed ${entry.path} to $mid") >> IO.pure(
+                  entry.focus(_.replicas).modify(_.appended(mid))
+                )
             }
           }
         }
