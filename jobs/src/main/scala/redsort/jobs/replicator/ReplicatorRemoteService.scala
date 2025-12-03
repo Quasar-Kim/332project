@@ -16,12 +16,13 @@ import com.google.protobuf.empty.Empty
 import redsort.jobs.messages.WriteRequest
 import fs2.io.file.Path
 import com.google.protobuf.ByteString
+import fs2._
 
 object ReplicatorRemoteService {
   type ServiceType = ReplicatorRemoteServiceFs2Grpc[IO, Metadata]
 
   private[this] val logger = new SourceLogger(getLogger, "replicator-remote")
-  private val CHUNK_SIZE = 1 * 1000 * 1000 // 10MB
+  private val CHUNK_SIZE = 1 * 1000 * 1000 // 1MB
 
   def init(
       ctx: FileStorage,
@@ -36,6 +37,31 @@ object ReplicatorRemoteService {
           .map(chunk => new Packet(ByteString.copyFrom(chunk.toByteBuffer)))
       }
 
-      override def write(request: fs2.Stream[IO, WriteRequest], ctx: Metadata): IO[Empty] = ???
+      override def write(request: fs2.Stream[IO, WriteRequest], _ctx: Metadata): IO[Empty] = {
+        request.pull.uncons1
+          .flatMap {
+            case None => Pull.raiseError[IO](new IllegalArgumentException("Empty stream"))
+
+            case Some((metadata, dataStream)) =>
+              metadata.payload.path match {
+                case None => Pull.raiseError[IO](new IllegalArgumentException("Missing path"))
+
+                case Some(path) => {
+                  val writeStream =
+                    dataStream.flatMap(msg =>
+                      msg.payload.data match {
+                        case Some(data) => Stream.chunk(Chunk.byteBuffer(data.asReadOnlyByteBuffer))
+                        case None       =>
+                          Stream.raiseError[IO](new IllegalArgumentException("Missing data"))
+                      }
+                    )
+                  Pull.eval(ctx.save(path, writeStream)) >> Pull.output1(new Empty)
+                }
+              }
+          }
+          .stream
+          .compile
+          .lastOrError
+      }
     }
 }

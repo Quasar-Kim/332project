@@ -17,14 +17,17 @@ import redsort.jobs.messages.ReplicatorRemoteServiceFs2Grpc
 import redsort.jobs.context.interface.FileStorage
 import redsort.jobs.worker.Directories
 import redsort.jobs.messages.ReadRequest
-import fs2.Chunk
+import fs2._
 import fs2.io.file.Path
+import redsort.jobs.messages.WriteRequest
+import com.google.protobuf.ByteString
 
 object ReplicatorLocalService {
   type ServiceType = ReplicatorLocalServiceFs2Grpc[IO, Metadata]
   type ClientType = ReplicatorRemoteServiceFs2Grpc[IO, Metadata]
 
   private[this] val logger = new SourceLogger(getLogger, "replicator-local")
+  private val CHUNK_SIZE = 1 * 1000 * 1000 // 1MB
 
   def init(
       replicatorAddrs: Map[Mid, NetAddr],
@@ -60,6 +63,22 @@ object ReplicatorLocalService {
         )
       }
 
-      override def push(request: PushRequest, ctx: Metadata): IO[ReplicationResult] = ???
+      override def push(request: PushRequest, _ctx: Metadata): IO[ReplicationResult] = {
+        // build head (metadata) of stream
+        val metadata = new WriteRequest(WriteRequest.Payload.Path(request.path))
+        val streamHead = Stream.emit(metadata).covary[IO]
+
+        // build tail (data) of stream
+        val localPath = Directories.resolvePath(dirs, Path(request.path))
+        val streamTail = ctx
+          .read(localPath.toString)
+          .chunkN(CHUNK_SIZE)
+          .map(c => WriteRequest(WriteRequest.Payload.Data(ByteString.copyFrom(c.toByteBuffer))))
+
+        // call remote client's write() method
+        val client = clients(request.dst)
+        val stream = streamHead ++ streamTail
+        client.write(stream, new Metadata).map(_ => ReplicationResult(success = true))
+      }
     }
 }
