@@ -254,17 +254,28 @@ object Scheduler {
     * @return
     *   sequence of synchornization jobs to be scheduled.
     */
-  def syncJobSpecs(files: Map[Int, Map[String, FileEntry]]): Seq[JobSpec] =
-    files.toSeq.map { case (mid, entries) =>
+  def syncJobSpecs(files: Map[Int, Map[String, FileEntry]]): Seq[JobSpec] = {
+    /* Entries in `files(mid)` are local files of machine with ID `mid`, which are file entries
+       that have `mid` as its first element of `replicas` field.
+       We build dictionary of every files present in each machine by also taking account of
+       nonlocal, replicated files pushed by other machines. */
+    val allFileEntries = files.toSeq.map(_._2.toSeq.map(_._2)).flatten
+    val allFilesMap: Map[Int, Seq[FileEntry]] = files.keys.map { mid =>
+      val f = allFileEntries.filter(_.replicas.contains(mid))
+      (mid, f)
+    }.toMap
+
+    allFilesMap.toSeq.map { case (mid, entries) =>
       new JobSpec(
         name = SYNC_JOB_NAME,
-        args = entries.values.map(FileEntry.toMsg(_)).toSeq,
+        args = entries.map(FileEntry.toMsg(_)).toSeq,
         inputs = Seq(),
         outputs = Seq(
           new FileEntry(path = s"@{working}/synced.${mid}", size = -1, replicas = Seq(mid))
         ) // this job will be scheduled to worker with `mid`
       )
     }
+  }
 
   val SYNC_JOB_NAME = "__sync__"
 }

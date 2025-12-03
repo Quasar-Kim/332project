@@ -346,7 +346,7 @@ class SchedulerSpec extends AsyncSpec {
         result <- scheduler.runJobs(Seq(jobA, jobB, jobC, jobD)).attempt
       } yield {
         result match {
-          case Left(error) => ()
+          case Left(error) =>
           case Right(_)    => fail("runJobs did not returned error")
         }
       }
@@ -403,5 +403,33 @@ class SchedulerSpec extends AsyncSpec {
         (f.workerRpcClientStub.complete _).calls.length should be(4)
       }
     }.timeout(1.second)
+  }
+
+  behavior of "Scheduler.syncJobSpecs"
+
+  it should "create sync jobs whose argument contains all files present in the machine" in {
+    val files = Map(
+      0 -> Map(
+        "@{working}/a" -> new FileEntry(path = "@{working}/a", size = 1024, replicas = Seq(0, 1))
+      ),
+      1 -> Map(
+        "@{working}/b" -> new FileEntry(path = "@{working}/b", size = 1024, replicas = Seq(0, 1))
+      )
+    )
+
+    val specs = Scheduler.syncJobSpecs(files)
+    IO {
+      val machineOneSpec = specs.find(_.outputs(0).replicas == Seq(0)).get
+      val machineOneFiles = machineOneSpec.args.map { case msg: FileEntryMsg =>
+        FileEntry.fromMsg(msg).path
+      }
+      machineOneFiles.toSet shouldBe Set("@{working}/a", "@{working}/b")
+
+      val machineTwoSpec = specs.find(_.outputs(0).replicas == Seq(1)).get
+      val machineTwoFiles = machineTwoSpec.args.map { case msg: FileEntryMsg =>
+        FileEntry.fromMsg(msg).path
+      }.toSet
+      machineTwoFiles.toSet shouldBe Set("@{working}/a", "@{working}/b")
+    }
   }
 }
