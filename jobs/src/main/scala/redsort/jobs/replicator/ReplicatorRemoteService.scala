@@ -55,7 +55,8 @@ object ReplicatorRemoteService {
                           Stream.raiseError[IO](new IllegalArgumentException("Missing data"))
                       }
                     )
-                  Pull.eval(ctx.save(path, writeStream)) >> Pull.output1(new Empty)
+                  val localPath = Directories.resolvePath(dirs, Path(path))
+                  Pull.eval(ctx.save(localPath.toString, writeStream)) >> Pull.output1(new Empty)
                 }
               }
           }
