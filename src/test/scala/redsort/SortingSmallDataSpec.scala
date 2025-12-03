@@ -123,6 +123,19 @@ class SortingSmallDataSpec extends AsyncFunSuite with AsyncIOSpec {
     )(spawnMasterAndWorker)
   }
 
+  test("sorting-10x1-1x1-1kb") {
+    testSorting(
+      name = "sorting-10x1-1x1-1kb",
+      numMachines = 10,
+      numInputDirs = 1,
+      numFilesPerInputDir = 1,
+      recordsPerFile = 100,
+      numWorkerThreads = 1,
+      masterPort = masterPortBase.getNext,
+      workerBasePort = workerPortBase.getNext
+    )(spawnMasterAndWorker)
+  }
+
   test("sorting-2x4-400MB") {
     testSorting(
       name = "sorting-2x4-400MB",
@@ -135,4 +148,5 @@ class SortingSmallDataSpec extends AsyncFunSuite with AsyncIOSpec {
       workerBasePort = workerPortBase.getNext
     )(spawnMasterAndWorker)
   }
+
 }
