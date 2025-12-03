@@ -23,6 +23,7 @@ class SourceLogger(underlying: Logger, var initialId: String = "unknown") {
 
   def info(msg: String): IO[Unit] = withMDC { underlying.info(msg) }
   def debug(msg: String): IO[Unit] = withMDC { underlying.debug(msg) }
+  def warn(msg: String): IO[Unit] = withMDC { underlying.warn(msg) }
   def error(msg: String): IO[Unit] = withMDC { underlying.error(msg) }
   def setSourceId(newId: String): IO[Unit] = IO({
     sourceIdRef.set(newId)
