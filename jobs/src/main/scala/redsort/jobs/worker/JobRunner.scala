@@ -110,7 +110,7 @@ object JobRunner {
       def pullMissingFiles(inputs: Seq[FileEntry], mid: Int): IO[Unit] =
         inputs
           .traverse { entry =>
-            ctx.exists(entry.path).flatMap {
+            ctx.exists(Directories.resolvePath(dirs, Path(entry.path)).toString).flatMap {
               case true  => IO.unit
               case false => {
                 val sources = entry.replicas.filter(_ != mid)
