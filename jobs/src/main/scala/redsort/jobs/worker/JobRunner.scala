@@ -19,6 +19,7 @@ import monocle.syntax.all._
 import io.grpc.Metadata
 import redsort.jobs.workers.SharedState
 import redsort.jobs.RPChelper
+import cats.effect.std.Random
 
 trait JobRunner {
   def addHandler(entry: Tuple2[String, JobHandler]): IO[JobRunner]
@@ -57,8 +58,9 @@ object JobRunner {
             }
           )
           _ <- logger.debug(s"$wid: got job spec: ${spec}")
-          _ <- logger.debug(s"$wid: preparing inputs for job ${spec.name}...")
+
           // prepare inputs and outputs
+          _ <- logger.debug(s"$wid: preparing inputs for job ${spec.name}...")
           inputs <- prepareInputs(spec.inputs.map(FileEntry.fromMsg(_)))
           outputs <- prepareOuptputs(spec.outputs.map(FileEntry.fromMsg(_)))
 
@@ -80,8 +82,10 @@ object JobRunner {
             s"$wid: handler for job ${spec.name} returned, took ${(end - start) / 1000}"
           )
 
-          // job was successful, create job result
-          outputs <- resolveFileSizes(spec.outputs, ctx)
+          // job was successful, replicate all output files, find
+          // their actual sizes, then create job result
+          replicatedOutputs <- replicateOutputs(spec.outputs, ctx)
+          outputs <- resolveFileSizes(replicatedOutputs, ctx)
         } yield {
           val ret = retval match {
             case Some(buf) => Some(ByteString.copyFrom(buf))
@@ -141,13 +145,6 @@ object JobRunner {
         }
       }
 
-      // NOTE: this will retry pull until local RPC service becomes available, and
-      // will NOT retry on replication failure.
-      private def pullWithRetry(request: PullRequest): IO[ReplicationResult] =
-        replicatorClient
-          .pull(request, new Metadata)
-          .handleErrorWith(RPChelper.handleRpcErrorWithRetry(pullWithRetry(request)))
-
       def prepareOuptputs(outputs: Seq[FileEntry]): IO[Seq[Path]] =
         IO.pure(fileEntriesToPaths(outputs))
 
@@ -166,11 +163,57 @@ object JobRunner {
         new WorkerErrorWrapper(workerError)
       }
 
+      def replicateOutputs(entries: Seq[FileEntryMsg], ctx: FileStorage): IO[Seq[FileEntryMsg]] =
+        entries.traverse { entry =>
+          for {
+            candidates <- replicationDstCandidates
+            replicatedEntry <-
+              if (candidates.isEmpty) IO.pure(entry)
+              else tryPush(entry, candidates)
+          } yield replicatedEntry
+        }
+
+      def replicationDstCandidates: IO[List[Mid]] =
+        stateR.get.flatMap { s =>
+          val candidates = s.replicatorAddrs.keys.filter(_ != s.wid.get.mid)
+          Random[IO].shuffleList(candidates.toList)
+        }
+
+      def tryPush(entry: FileEntryMsg, dstCandidates: Seq[Mid]): IO[FileEntryMsg] =
+        dstCandidates match {
+          case Nil =>
+            logger.error(s"failed to push output file ${entry.path}") >>
+              IO.raiseError(
+                WorkerErrorWrapper(
+                  WorkerError(kind = WorkerErrorKind.OUTPUT_REPLICATION_ERROR, inner = None)
+                )
+              )
+          case mid :: nextCandidates => {
+            val request = PushRequest(path = entry.path, dst = mid)
+            pushWithRetry(request).attempt.flatMap {
+              case Left(err) => tryPush(entry, nextCandidates)
+              case Right(_)  => IO.pure(entry.focus(_.replicas).modify(_.appended(mid)))
+            }
+          }
+        }
+
       def resolveFileSizes(entries: Seq[FileEntryMsg], ctx: FileStorage): IO[Seq[FileEntryMsg]] =
         entries.traverse { entry =>
           val path = Directories.resolvePath(dirs, Path(entry.path))
           ctx.fileSize(path.toString).map(size => entry.focus(_.size).replace(size))
         }
+
+      // NOTE: these methods will retry pull until local RPC service becomes available, and
+      // will NOT retry on replication failure.
+      private def pullWithRetry(request: PullRequest): IO[ReplicationResult] =
+        replicatorClient
+          .pull(request, new Metadata)
+          .handleErrorWith(RPChelper.handleRpcErrorWithRetry(pullWithRetry(request)))
+
+      private def pushWithRetry(request: PushRequest): IO[ReplicationResult] =
+        replicatorClient
+          .push(request, new Metadata)
+          .handleErrorWith(RPChelper.handleRpcErrorWithRetry(pushWithRetry(request)))
 
       override def getHandlers: Map[String, JobHandler] = handlers
     })

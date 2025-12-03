@@ -22,6 +22,7 @@ import io.grpc.Metadata
 import redsort.jobs.workers.SharedState
 import redsort.jobs.Common.Wid
 import redsort.jobs.Common.NetAddr
+import redsort.jobs.Common.Mid
 
 class JobRunnerSpec extends AsyncSpec {
   def fixture = new {
@@ -47,7 +48,7 @@ class JobRunnerSpec extends AsyncSpec {
     (replicatorStub.pull _).returnsWith(IO.pure(new ReplicationResult(success = true)))
     (replicatorStub.push _).returnsWith(IO.pure(new ReplicationResult(success = true)))
 
-    val getJobRunner =
+    def getJobRunner(replicators: Map[Mid, NetAddr] = replicatorAddrs) =
       for {
         stateR <- SharedState.init
         _ <- stateR.modify { s =>
@@ -55,7 +56,7 @@ class JobRunnerSpec extends AsyncSpec {
             s.focus(_.wid)
               .replace(Some(new Wid(0, 0)))
               .focus(_.replicatorAddrs)
-              .replace(replicatorAddrs),
+              .replace(replicators),
             IO.unit
           )
         }
@@ -99,7 +100,7 @@ class JobRunnerSpec extends AsyncSpec {
   "JobRunner.addHandler" should "add handler" in {
     val f = fixture
     for {
-      runner <- f.getJobRunner
+      runner <- f.getJobRunner()
       runner <- runner.addHandler("hi" -> f.handlerStub)
     } yield {
       runner.getHandlers.size should be(2)
@@ -119,7 +120,7 @@ class JobRunnerSpec extends AsyncSpec {
     }
 
     for {
-      runner <- f.getJobRunner
+      runner <- f.getJobRunner()
       result <- runner.runJob(f.helloSpec)
     } yield {
       result.success should be(true)
@@ -135,7 +136,7 @@ class JobRunnerSpec extends AsyncSpec {
     }
 
     for {
-      runner <- f.getJobRunner
+      runner <- f.getJobRunner()
       result <- runner.runJob(f.helloSpec)
     } yield {
       result.success should be(false)
@@ -150,7 +151,7 @@ class JobRunnerSpec extends AsyncSpec {
     }
 
     for {
-      runner <- f.getJobRunner
+      runner <- f.getJobRunner()
       result <- runner.runJob(f.helloSpec)
     } yield {
       result.success should be(false)
@@ -170,7 +171,7 @@ class JobRunnerSpec extends AsyncSpec {
     )
 
     for {
-      runner <- f.getJobRunner
+      runner <- f.getJobRunner()
       result <- runner.runJob(badSpec)
     } yield {
       result.success should be(false)
@@ -196,7 +197,7 @@ class JobRunnerSpec extends AsyncSpec {
       )
 
     for {
-      runner <- f.getJobRunner
+      runner <- f.getJobRunner()
       result <- runner.runJob(helloSpec)
     } yield {
       result.success should be(true)
@@ -222,7 +223,7 @@ class JobRunnerSpec extends AsyncSpec {
       )
 
     for {
-      runner <- f.getJobRunner
+      runner <- f.getJobRunner()
       result <- runner.runJob(helloSpec)
     } yield {
       (f.replicatorStub.pull _).calls(0)._1.path shouldBe filename
@@ -251,7 +252,7 @@ class JobRunnerSpec extends AsyncSpec {
       )
 
     for {
-      runner <- f.getJobRunner
+      runner <- f.getJobRunner()
       result <- runner.runJob(helloSpec)
     } yield {
       (f.replicatorStub.pull _).calls(0)._1.path shouldBe filename
@@ -278,7 +279,7 @@ class JobRunnerSpec extends AsyncSpec {
       )
 
     for {
-      runner <- f.getJobRunner
+      runner <- f.getJobRunner()
       result <- runner.runJob(helloSpec)
     } yield {
       // check if pull requests has been made
@@ -293,37 +294,53 @@ class JobRunnerSpec extends AsyncSpec {
     }
   }
 
-  // it should "try replicating output file to one of remote replicators" in {
-  //   val f = fixture
-  //   (f.handlerStub.apply _).returnsWith(IO.pure(None))
-  //   (f.replicatorStub.push _).returnsOnCall {
-  //     case 4 => IO.pure(ReplicationResult(success = true))
-  //     case _ => IO.raiseError(new IllegalArgumentException("some error"))
-  //   }
+  it should "try replicating output file to one of remote replicators" in {
+    val f = fixture
+    (f.handlerStub.apply _).returnsWith(IO.pure(None))
+    (f.replicatorStub.push _).returnsOnCall {
+      case 2 => IO.pure(ReplicationResult(success = true))
+      case _ => IO.raiseError(new IllegalArgumentException("some error"))
+    }
 
-  //   for {
-  //     runner <- f.getJobRunner
-  //     result <- runner.runJob(f.helloSpec)
-  //   } yield {
-  //     assume(result.success)
+    for {
+      runner <- f.getJobRunner()
+      result <- runner.runJob(f.helloSpec)
+    } yield {
+      assume(result.success)
 
-  //     (f.replicatorStub.push _).calls.length shouldBe 3
-  //     (f.replicatorStub.push _).calls.map(_._1.path).toSet shouldBe Set.fill(3)("@{output}/files/c")
-  //     (f.replicatorStub.push _).calls.map(_._1.dst).toSet shouldBe Set(1, 2, 3)
-  //   }
-  // }
+      (f.replicatorStub.push _).calls.length shouldBe 2
+      (f.replicatorStub.push _).calls.map(_._1.path).toSet shouldBe Set.fill(2)("@{output}/files/c")
+      (f.replicatorStub.push _).calls.map(_._1.dst).toSet.size shouldBe 2
+      result.outputs(0).replicas.length shouldBe 2
+    }
+  }
 
-  // it should "return failed result of output push fails" in {
-  //   val f = fixture
-  //   (f.handlerStub.apply _).returnsWith(IO.pure(None))
-  //   (f.replicatorStub.push _).returnsWith(IO.raiseError(new IllegalArgumentException("some error")))
+  it should "not replicate output file if there is only one machine" in {
+    val f = fixture
+    (f.handlerStub.apply _).returnsWith(IO.pure(None))
 
-  //   for {
-  //     runner <- f.getJobRunner
-  //     result <- runner.runJob(f.helloSpec)
-  //   } yield {
-  //     result.success shouldBe false
-  //     result.error.get.kind shouldBe WorkerErrorKind.OUTPUT_REPLICATION_ERROR
-  //   }
-  // }
+    for {
+      runner <- f.getJobRunner(Map(0 -> f.replicatorAddrs(0)))
+      result <- runner.runJob(f.helloSpec)
+    } yield {
+      assume(result.success)
+
+      (f.replicatorStub.push _).calls.length shouldBe 0
+      result.outputs(0).replicas.length shouldBe 1
+    }
+  }
+
+  it should "return failed result of output push fails" in {
+    val f = fixture
+    (f.handlerStub.apply _).returnsWith(IO.pure(None))
+    (f.replicatorStub.push _).returnsWith(IO.raiseError(new IllegalArgumentException("some error")))
+
+    for {
+      runner <- f.getJobRunner()
+      result <- runner.runJob(f.helloSpec)
+    } yield {
+      result.success shouldBe false
+      result.error.get.kind shouldBe WorkerErrorKind.OUTPUT_REPLICATION_ERROR
+    }
+  }
 }
