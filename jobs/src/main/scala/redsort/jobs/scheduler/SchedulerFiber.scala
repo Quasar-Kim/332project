@@ -142,7 +142,9 @@ object SchedulerFiber {
         val files = jobs
           .map(
             _.spec.inputs
-              .filter(entry => entry.path.startsWith("@{working}") && entry.replicas.contains(mid))
+              .filter(entry =>
+                entry.path.startsWith("@{working}") && entry.replicas.startsWith(Seq(mid))
+              )
               .map(_.path)
           )
           .flatten
@@ -153,13 +155,11 @@ object SchedulerFiber {
         val files = jobs
           .map(
             _.result.get.outputs
-              .filter(_.replicas.contains(mid))
+              .filter(_.replicas.startsWith(Seq(mid)))
               .map(entryMsg => (entryMsg.path, FileEntry.fromMsg(entryMsg)))
           )
           .flatten
-          .filter { case (path, _) =>
-            !path.startsWith("@{working}/synced.")
-          } // do not track "synced" file procued by __sync__ job
+          .filter { case (path, _) => !path.startsWith("@{working}/synced.") }
           .to(Map)
         (mid, files)
       }
