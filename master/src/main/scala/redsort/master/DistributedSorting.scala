@@ -107,7 +107,7 @@ object DistributedSorting {
     * @return
     */
   def sampleStep(files: Map[Mid, Map[String, FileEntry]]): Seq[JobSpec] = {
-    files.toSeq.map {
+    files.toSeq.collect {
       case (mid, localFiles) if (localFiles.nonEmpty) =>
         val inputs = (localFiles.toSeq).lift(0) match {
           case Some(value) => Seq(value._2)
