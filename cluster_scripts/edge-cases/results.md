@@ -60,24 +60,12 @@ Results in 2 partition files (1_280_000 records each) sorted correctly.
 
 ## Multiple giant input files
 A few files, but all are large.
-TODO
 
-# Partition ranges
-## Disjoint input
-The input ranges on different workers are disjoint from the start, e.g., ```vm01``` has the largest key ```K```, and the smallest key in the input on ```vm02``` is larger than ```K```.
-
-## "Cusper" records
-Some keys that are exactly on the cusp of the partition ranges, e.g., the range assigned to ```vm01``` is ```[0,K]``` for some key ```K``` and the input (on any machine) contains a record with key ```K```.
-
-# Skeweness and distribution
-## Skewed towards the start
-E.g., many "AAA..."
-
-## Skewed towads the end
-E.g., many "ZZZ..."
-
-## Uneven distribution
-E.g., a large portion of records share a prefix.
+# Skewed
+The genereted records are skewed, i.e., they are non-uniformly distributed.
+**Success**. Tried:
+- 2 machines, 1 directory, 2 files with 100 ascii records (400 records overall)
+- 5 machines, 2 directories, 4 files with 10_000 binary records each (400_000 records overall, 390_000 duplicate keys)
 
 # Duplicates
 ## Identical files
