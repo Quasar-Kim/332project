@@ -37,17 +37,40 @@ class PartitionJobHandler extends JobHandler {
       contents <- ctx.readAll(inputs.head.toString)
       partitions = partitionsFromArgs(args)
 
-      slices <- Stream
+      // Comment(jaehwan): Split into big chunks first.
+      // If an entire big chunk belongs to a single partition, emit it as is.
+      // If not, we can use existed logic to split into every records and assign partitions.
+      // This optimization makes about 5x ~ 30x speedup in my test.
+      // The input file MUST be sorted!
+      slices = Stream
         .chunk(Chunk.array(contents))
-        .chunkN(100)
-        .groupAdjacentBy(findPartition(partitions))
-        .covary[IO]
+        .chunkN(BULK_SIZE)
+        .flatMap { bigChunk =>
+          if (bigChunk.isEmpty) Stream.empty
+          else {
+            val firstRecord = bigChunk.take(RECORD_SIZE)
+            val lastRecordOfs = bigChunk.size - RECORD_SIZE
+            val lastRecord = bigChunk.drop(lastRecordOfs)
+            val startPartition = findPartition(partitions)(firstRecord.take(10))
+            val endPartition = findPartition(partitions)(lastRecord.take(10))
+            if (startPartition == endPartition) {
+              Stream.emit((startPartition, bigChunk))
+            } else {
+              Stream
+                .chunk(bigChunk)
+                .chunkN(RECORD_SIZE)
+                .map(record => (findPartition(partitions)(record), record))
+            }
+          }
+        }
         .compile
         .toList
-      sliceMap = slices.toMap
+
+      groupedSlices = slices.groupMap(_._1)(_._2)
 
       _ <- outputs.zipWithIndex.map { case (p, i) =>
-        ctx.save(p.toString, Stream.chunk(sliceMap.getOrElse(i, Chunk.empty)).unchunks)
+        val chunksForPartition = groupedSlices.getOrElse(i, List.empty)
+        ctx.save(p.toString, Stream.emits(chunksForPartition).unchunks)
       }.parSequence
     } yield None
   }
@@ -57,6 +80,8 @@ object PartitionJobHandler {
   val RECORD_SIZE = 100 // 100 bytes
   val MIN_KEY = ByteString.fromHex("00" * 10)
   val MAX_KEY = ByteString.fromHex("ff" * 11)
+  val BULK_SIZE = 640 * 100 // 640 records, 64KB
+  val MAX_KEY_CHUNK = Chunk.byteBuffer(MAX_KEY.asReadOnlyByteBuffer())
 
   def partitionsFromArgs(args: Seq[ProtobufAny]): Seq[Tuple2[Chunk[Byte], Chunk[Byte]]] = {
     val ends = args.map(_.unpack[BytesArg].value)
@@ -68,8 +93,8 @@ object PartitionJobHandler {
 
   implicit object RecordOrder extends Order[Chunk[Byte]] {
     override def compare(x: Chunk[Byte], y: Chunk[Byte]): Int = {
-      if (x == MAX_KEY) return 1
-      else if (y == MAX_KEY) return -1
+      if (x == MAX_KEY_CHUNK) return 1
+      else if (y == MAX_KEY_CHUNK) return -1
 
       var i = 0
       while (i < 10) {

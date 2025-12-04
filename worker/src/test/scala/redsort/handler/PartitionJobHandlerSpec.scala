@@ -24,10 +24,24 @@ import scala.math.Ordering.Implicits._
 
 import redsort.worker.testctx._
 import redsort.worker.handlers.PartitionJobHandler._
+import redsort.worker.handlers.Record
 
 class PartitionJobHandlerSpec extends AsyncFlatSpec with AsyncIOSpec with Matchers {
   def makeArgFromByteString(bytes: ByteString): ProtobufAny = {
     any.Any.pack(new BytesArg(value = bytes))
+  }
+
+  def compareKeys(x: Array[Byte], y: Array[Byte]): Boolean = {
+    // x <= y : true
+    var i = 0
+    while (i < 10) {
+      val a = x(i) & 0xff
+      val b = y(i) & 0xff
+      if (a < b) return true
+      else if (a > b) return false
+      else i += 1
+    }
+    true
   }
 
   def fixture = new {
@@ -154,4 +168,5 @@ class PartitionJobHandlerSpec extends AsyncFlatSpec with AsyncIOSpec with Matche
       firstPartitionBytes shouldBe (f.inputContents.toByteArray())
     }
   }
+  
 }
