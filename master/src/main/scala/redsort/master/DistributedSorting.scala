@@ -45,36 +45,45 @@ object DistributedSorting {
       addrs <- scheduler.machineAddrs
       _ <- printMachineAddrs(addrs)
 
-      // stage 1: sample
-      _ <- logger.info("stage 1: sample")
-      samplingResult <- scheduler.runJobs(sampleStep(initialFiles))
+      hasFiles = initialFiles.values.exists(_.nonEmpty)
 
-      // calculate partitions
-      samples <- IO.pure(getSamplesFromResults(samplingResult))
-      _ <- logger.info(
-        s"calculated partitions from ${samples.size() / 1024 / 1024} MB samples..."
-      )
-      partitions <- IO.pure(
-        Partition.findPartitions(
-          samples = samples,
-          numPartitions = scheduler.getNumMachines
-        )
-      )
-      _ <- logger.debug(s"partition calculation done: $partitions")
+      _ <-
+        if (!hasFiles) {
+          logger.debug("No input files found. Skipping all stages.")
+        } else
+          for {
 
-      // stage 2: sort
-      _ <- logger.info("stage 2: sorting")
-      sortingResult <- scheduler.runJobs(sortStep(samplingResult.files))
+            // stage 1: sample
+            _ <- logger.info("stage 1: sample")
+            samplingResult <- scheduler.runJobs(sampleStep(initialFiles))
 
-      // stage 3: partition
-      _ <- logger.info("stage 3: partitioning")
-      partitionResult <- scheduler.runJobs(partitionStep(sortingResult.files, partitions))
+            // calculate partitions
+            samples <- IO.pure(getSamplesFromResults(samplingResult))
+            _ <- logger.info(
+              s"calculated partitions from ${samples.size() / 1024 / 1024} MB samples..."
+            )
+            partitions <- IO.pure(
+              Partition.findPartitions(
+                samples = samples,
+                numPartitions = scheduler.getNumMachines
+              )
+            )
+            _ <- logger.debug(s"partition calculation done: $partitions")
 
-      // stage 4: merge
-      _ <- logger.info("stage 4: merging")
-      mergeResult <- scheduler.runJobs(
-        mergeStep(partitionResult.files, outFileSize = config.outFileSize)
-      )
+            // stage 2: sort
+            _ <- logger.info("stage 2: sorting")
+            sortingResult <- scheduler.runJobs(sortStep(samplingResult.files))
+
+            // stage 3: partition
+            _ <- logger.info("stage 3: partitioning")
+            partitionResult <- scheduler.runJobs(partitionStep(sortingResult.files, partitions))
+
+            // stage 4: merge
+            _ <- logger.info("stage 4: merging")
+            mergeResult <- scheduler.runJobs(
+              mergeStep(partitionResult.files, outFileSize = config.outFileSize)
+            )
+          } yield ()
 
       // finalize
       workerAddrs <- scheduler.workerAddrs
@@ -98,18 +107,19 @@ object DistributedSorting {
     * @return
     */
   def sampleStep(files: Map[Mid, Map[String, FileEntry]]): Seq[JobSpec] = {
-    files.toSeq.map { case (mid, localFiles) =>
-      val inputs = (localFiles.toSeq).lift(0) match {
-        case Some(value) => Seq(value._2)
-        case None        => Seq()
-      }
+    files.toSeq.collect {
+      case (mid, localFiles) if (localFiles.nonEmpty) =>
+        val inputs = (localFiles.toSeq).lift(0) match {
+          case Some(value) => Seq(value._2)
+          case None        => Seq()
+        }
 
-      new JobSpec(
-        name = "sample",
-        args = Seq(),
-        inputs = inputs,
-        outputs = Seq()
-      )
+        new JobSpec(
+          name = "sample",
+          args = Seq(),
+          inputs = inputs,
+          outputs = Seq()
+        )
     }
   }
 
