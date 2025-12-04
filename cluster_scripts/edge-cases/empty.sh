@@ -126,7 +126,7 @@ mix() {
                 "mkdir -p $inp_parent/dir$i"
             if [[ $i -lt $filled_dirs ]]; then
                 for ((j=0; j<n_files; j++)); do
-                    if [[ $j -lt $filled_files ]]; then
+                    if [[ $j -lt $empty_files ]]; then
                         ssh $USER@$worker -p $WORKER_SSH_PORT \
                             "> $inp_parent/dir$i/file$j"
                     else

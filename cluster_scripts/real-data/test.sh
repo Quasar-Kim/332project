@@ -30,7 +30,7 @@ usage() {
 master() {
     # start master
     local n=$1
-    local port=$2
+    local port=${2:-5000}
     #( cd "$DIR_PROJECT" && sbt "master/run $n --port $port" )
     java -jar /home/red/332project/master/target/scala-2.13/master.jar $n --port $port
 }
