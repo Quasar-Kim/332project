@@ -151,7 +151,7 @@ object DistributedSortingTestHelper {
     }
   }
 
-  private def validate(baseDir: Path, machineOrder: Seq[Int], inputRecordCount: Int) = {
+  private def validate(baseDir: Path, machineOrder: Seq[Int], inputRecordCount: Int): Unit = {
     // 4. Run valsort
     // We must gather output files in the order of machines returned by the body.
     // Within a machine, we assume partition files are ordered by their partition number.
@@ -160,31 +160,39 @@ object DistributedSortingTestHelper {
       val outputDir = baseDir.resolve(s"worker$workerIdx").resolve("output")
 
       if (!Files.exists(outputDir)) {
-        throw new RuntimeException(s"Output directory missing for worker$workerIdx: $outputDir")
-      }
+        if (inputRecordCount == 0) Seq.empty
+        else
+          throw new RuntimeException(s"Output directory missing for worker$workerIdx: $outputDir")
+      } else {
+        // Get files, filter for "partition.<n>", sort them by order of <n>.
+        val files = Files
+          .list(outputDir)
+          .iterator()
+          .asScala
+          .toSeq
+          .filter(p => p.getFileName.toString.startsWith("partition."))
+          .sortBy { p =>
+            val fileName = p.getFileName.toString
+            val index = fileName.substring("partition.".length, fileName.length).toInt
+            index
+          }
 
-      // Get files, filter for "partition.<n>", sort them by order of <n>.
-      val files = Files
-        .list(outputDir)
-        .iterator()
-        .asScala
-        .toSeq
-        .filter(p => p.getFileName.toString.startsWith("partition."))
-        .sortBy { p =>
-          val fileName = p.getFileName.toString
-          val index = fileName.substring("partition.".length, fileName.length).toInt
-          index
+        if (files.isEmpty) {
+          if (inputRecordCount > 0) {
+            throw new RuntimeException(s"No partition files found in $outputDir")
+          }
+          Seq.empty
+        } else {
+          files
         }
-
-      if (files.isEmpty) {
-        throw new RuntimeException(s"No partition files found in $outputDir")
       }
-
-      files
     }
-
     if (allOutputFiles.isEmpty) {
-      throw new RuntimeException("No output files found across any workers.")
+      if (inputRecordCount == 0) {
+        return // validate success
+      } else {
+        throw new RuntimeException("No output files found across any workers.")
+      }
     }
 
     // validate sort order
