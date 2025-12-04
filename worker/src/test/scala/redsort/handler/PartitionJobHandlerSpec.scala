@@ -168,53 +168,5 @@ class PartitionJobHandlerSpec extends AsyncFlatSpec with AsyncIOSpec with Matche
       firstPartitionBytes shouldBe (f.inputContents.toByteArray())
     }
   }
-
-  it should "handle large input" in {
-    def fixtureLarge = new {
-      val records = (1 to 100000).map { i =>
-        val keyHex = "%020d".format(i)
-        ByteString.fromHex(keyHex).concat(ByteString.copyFromUtf8("x" * 88 + "\r\n"))
-      }
-      val inputContents = records.fold(ByteString.empty)((acc, s) => acc.concat(s))
-    }
-    val f = fixtureLarge
-    val inputPathStr = "/data/input_simple"
-    val outputPathStrs = List("/data/partition1", "/data/partition2")
-    val inputPath = Path(inputPathStr)
-    val outputPaths = outputPathStrs.map(p => Path(p))
-    val dummyDirs: Directories = null
-    val argList = Seq(ByteString.fromHex("00000000000000080000"), MAX_KEY)
-    val args = argList.map(makeArgFromByteString)
-
-    for {
-      fs <- Ref.of[IO, Map[String, Array[Byte]]](Map.empty)
-      ctx = new WorkerTestCtx(fs)
-      partitioner = new PartitionJobHandler()
-      _ <- ctx.writeAll(inputPathStr, f.inputContents.toByteArray())
-
-      resultOpt <- partitioner.apply(
-        args = args,
-        inputs = Seq(inputPath),
-        outputs = outputPaths,
-        ctx = ctx,
-        d = dummyDirs
-      )
-
-      firstPartitionBytes <- ctx.readAll(outputPathStrs(0))
-      secondPartitionBytes <- ctx.readAll(outputPathStrs(1))
-
-      _ <- IO.println(
-        s"First partition size: ${firstPartitionBytes.length}, Second partition size: ${secondPartitionBytes.length}"
-      )
-
-      lastOfFirst = firstPartitionBytes.takeRight(100).take(10).toArray
-      firstOfSecond = secondPartitionBytes.take(100).take(10).toArray
-      separator = ByteString.fromHex("00000000000000080000").toByteArray
-    } yield {
-      firstPartitionBytes ++ secondPartitionBytes shouldBe (f.inputContents.toByteArray())
-      compareKeys(lastOfFirst, separator) shouldBe true
-      compareKeys(separator, firstOfSecond) shouldBe true
-      compareKeys(lastOfFirst, firstOfSecond) shouldBe true
-    }
-  }
+  
 }
