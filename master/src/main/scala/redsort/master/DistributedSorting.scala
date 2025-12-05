@@ -17,7 +17,7 @@ import scala.collection.immutable.TreeMap
 /** Configuration for `DistributedSorting`.
   *
   * @param outFileSize
-  *   max size of each outputs files (`partition.$n` files)
+  *   max size of each outputs files (`partition.<n>` files)
   */
 final case class DistributedSortingConfig(
     outFileSize: Long
