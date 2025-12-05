@@ -397,7 +397,7 @@ class JobRunnerSpec extends AsyncSpec {
     }
   }
 
-  it should "return failed result of output push fails" in {
+  it should "return failed result if output push fails" in {
     val f = fixture
     (f.handlerStub.apply _).returnsWith(IO.pure(None))
     (f.replicatorStub.push _).returnsWith(IO.raiseError(new IllegalArgumentException("some error")))
@@ -422,6 +422,38 @@ class JobRunnerSpec extends AsyncSpec {
     } yield {
       result.success shouldBe false
       result.error.get.kind shouldBe WorkerErrorKind.OUTPUT_REPLICATION_ERROR
+    }
+  }
+
+  it should "ignore output push failure if there are only two machines in cluster" in {
+    val f = fixture
+    (f.handlerStub.apply _).returnsWith(IO.pure(None))
+    (f.replicatorStub.push _).returnsWith(IO.raiseError(new IllegalArgumentException("some error")))
+    val helloSpec = JobSpec.toMsg(
+      new JobSpec(
+        name = "hello",
+        args = Seq(new StringArg("hello")),
+        inputs = Seq(),
+        outputs = Seq(
+          new FileEntry(
+            path = "@{working}/files/c",
+            size = 1024,
+            replicas = Seq(0)
+          )
+        )
+      )
+    )
+    val replicatorAddrs = Map(
+      0 -> NetAddr("1.1.1.1", 5000),
+      1 -> NetAddr("1.1.1.2", 5000)
+    )
+
+    for {
+      runner <- f.getJobRunner(replicatorAddrs)
+      result <- runner.runJob(helloSpec)
+    } yield {
+      result.success shouldBe true
+      result.outputs(0).replicas shouldBe Seq(0)
     }
   }
 }

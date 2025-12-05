@@ -171,8 +171,21 @@ object JobRunner {
               for {
                 candidates <- replicationDstCandidates
                 replicatedEntry <-
-                  if (candidates.isEmpty) IO.pure(entry)
-                  else tryPush(entry, candidates)
+                  candidates match {
+                    case List() => IO.pure(entry)
+
+                    // If there are only two machines in the cluster and one machines goes down it is impossible to
+                    // replciate output.
+                    // Ignore error in this case.
+                    case List(mid) =>
+                      tryPush(entry, candidates).orElse(
+                        logger.error(
+                          s"suppressing push error because there are only two machines in cluster"
+                        ) >> IO.pure(entry)
+                      )
+
+                    case _ => tryPush(entry, candidates)
+                  }
               } yield replicatedEntry
             } else IO.pure(entry)
           }
@@ -192,6 +205,7 @@ object JobRunner {
                   WorkerError(kind = WorkerErrorKind.OUTPUT_REPLICATION_ERROR, inner = None)
                 )
               )
+
           case mid +: nextCandidates => {
             val request = PushRequest(path = entry.path, dst = mid)
             pushWithRetry(request).attempt.flatMap {
