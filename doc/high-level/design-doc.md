@@ -167,10 +167,6 @@ This method returns error when worker is running a job. In this case `error` fie
 
 Forcefully halts the worker.
 
-### Heartbeat
-
-Worker also periodically invoke `NotifyUp` RPC method of scheduler every 3 seconds.
-
 ## Scheduler Behavior
 
 ### Job Lifecycle
@@ -238,10 +234,6 @@ Register new worker. Called by when new worker is spawned or is restarted by mac
 Worker reports its wtid and optionally local storage information (input files and remaining storage). Local storage infomration is only reported by worker with wtid 0.
 
 Scheduler updates global file directory and changes worker status to UP. It responds with `SchedulerHello` which contains wid assigned to the worker.
-
-<ins>NotifyUp() → None</ins>
-
-Heartbeat mechanism. Worker should call this method for every 3 seconds. Worker that did not called this method more than 7 seconds is considered DOWN.
 
 <ins>HaltOnError(err: JobSystemError) → None</ins>
 
@@ -341,13 +333,12 @@ For every machine with *mid*, create and schedule the following jobs.
 
 # Fault Tolerance
 
-Fault tolerance is achieved by following mechanisms:
+Fault tolerance is achieved by output replication and retrying.
 
-1. All job outputs are stored on at least two machines. This ensures no files are lost due to machine fault.
-2. Scheduler tracks each workers' status (as UP or DOWN) using various mechanisms and stops dispatching job to worker with status DOWN.
-3. Worker can pull missing input files from other machines. This make it possible to run jobs on machine that faulted.
+- **output replication**: All job outputs are replicated to at least one machines. This ensures no files are lost due to machine fault. Restarted worker will pull missing files from other machines.
+- **retrying**: scheduler retries assigned job repeatedly, ignoring transport errors.
 
-These three simple rules can ensure all jobs can be run even in presence of machine fault.
+These two simple rules can ensure all jobs can be run even in presence of machine fault.
 
 Detailed description on fault tolerance mechanism can be found in code level design documentation.
 

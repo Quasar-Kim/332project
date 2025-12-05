@@ -176,6 +176,8 @@ enum RPCclientFiberEvents {
 
 ### Scheduler Fiber Behavior
 
+(OBSOLETE WARNING: currently actual behavior of scheduler fiber differs greatly from description here)
+
 Scheduler fiber is started with input message queue `evtQueue` and shared state `sharedState`. It also maintains internal `schedulerState`, which is defined as follows.
 
 ```rust
