@@ -19,11 +19,13 @@ usage() {
     echo ""
     echo "Run master: <data size> master <# of workers> <port for master; defualt 5000>"
     echo "Run workers: <data size> workers <# of workers> <port for master; defualt 5000> <port for 1st worker; defualt 6001> <port for replicator; defualt 7000>"
+    echo "Run workers with fault: <data size> faulty-workers <# of workers> <seconds before kill> <seconds down for> <port for master; defualt 5000> <port for 1st worker; defualt 6001> <port for replicator; defualt 7000>"
     echo "Validate result: <data size> validate <# of workers>"
     echo ""
     echo "Examples:"
     echo "./test.sh small master 2 5050"
     echo "./test.sh small workers 2 5050 6061 7070"
+    echo "./test.sh small faulty-workers 2 4 10 5050 6061 7070"
     echo "./test.sh small validate 2"
 }
 
@@ -31,7 +33,6 @@ master() {
     # start master
     local n=$1
     local port=${2:-5000}
-    #( cd "$DIR_PROJECT" && sbt "master/run $n --port $port" )
     java -jar /home/red/332project/master/target/scala-2.13/master.jar $n --port $port
 }
 
@@ -52,6 +53,59 @@ workers() {
         ssh -f $USER@$worker -p $WORKER_SSH_PORT \
             "java -jar /home/red/332project/worker/target/scala-2.13/worker.jar $MASTER_IP:$master_port -I $DIR_INPUT/$DATA_SIZE -O $DIR_OUTPUT/$DATA_SIZE/$n --port $worker1_port --replicator-local-port $replicator_port"
     done
+}
+
+faulty-workers() {
+    # create output directories and run workers
+    local n=$1
+    local before_kill=${2:-2}
+    local down_for=${3:-5}
+    local master_port=${4:-5000}
+    local worker1_port=${5:-6001}
+    local replicator_port=${6:-7000}
+    for worker in ${WORKER_IPS[@]:0:$((n-1))}; do
+        echo $worker;
+
+        # output
+        ssh $USER@$worker -p $WORKER_SSH_PORT \
+            "rm -rf $DIR_OUTPUT/$DATA_SIZE/$n; mkdir -p $DIR_OUTPUT/$DATA_SIZE/$n"
+
+        # run
+        ssh -f $USER@$worker -p $WORKER_SSH_PORT \
+            "java -jar /home/red/332project/worker/target/scala-2.13/worker.jar $MASTER_IP:$master_port -I $DIR_INPUT/$DATA_SIZE -O $DIR_OUTPUT/$DATA_SIZE/$n --port $worker1_port --replicator-local-port $replicator_port"
+    done
+
+    # start the faulty worker
+    local worker=${WORKER_IPS[$((n-1))]}
+    echo "faulty $worker"
+
+    # output
+    ssh $USER@$worker -p $WORKER_SSH_PORT \
+        "rm -rf $DIR_OUTPUT/$DATA_SIZE/$n; mkdir -p $DIR_OUTPUT/$DATA_SIZE/$n"
+
+    # run
+    ssh -f $USER@$worker -p $WORKER_SSH_PORT \
+        "java -jar /home/red/332project/worker/target/scala-2.13/worker.jar \
+            $MASTER_IP:$master_port \
+            -I $DIR_INPUT/$DATA_SIZE \
+            -O $DIR_OUTPUT/$DATA_SIZE/$n \
+            --port $worker1_port --replicator-local-port $replicator_port"
+    
+    # kill
+    sleep $before_kill
+    ssh $USER@$worker -p $WORKER_SSH_PORT \
+        "pkill -f /home/red/332project/worker/target/scala-2.13/worker.jar"
+    echo "killed $worker"
+
+    # restart
+    sleep $down_for
+    ssh -f $USER@$worker -p $WORKER_SSH_PORT \
+        "java -jar /home/red/332project/worker/target/scala-2.13/worker.jar \
+            $MASTER_IP:$master_port \
+            -I $DIR_INPUT/$DATA_SIZE \
+            -O $DIR_OUTPUT/$DATA_SIZE/$n \
+            --port $worker1_port --replicator-local-port $replicator_port"
+    echo "restarted $worker"
 }
 
 validate() {
@@ -110,6 +164,8 @@ case $2 in
         master $3 $4;;
     workers)
         workers $3 $4 $5 $6;;
+    faulty-workers)
+        faulty-workers $3 $4 $5 $6 $7 $8;;
     validate)
         validate $3;;
     *)
