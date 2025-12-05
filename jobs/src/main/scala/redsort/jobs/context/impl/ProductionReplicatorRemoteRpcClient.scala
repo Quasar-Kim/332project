@@ -16,9 +16,9 @@ trait ProductionReplicatorRemoteRpcClient extends ReplicatorRemoteRpcClient {
     NettyChannelBuilder
       .forAddress(addr.ip, addr.port)
       .usePlaintext()
-      .keepAliveTime(3, TimeUnit.SECONDS)
-      .keepAliveTimeout(2, TimeUnit.SECONDS)
-      .keepAliveWithoutCalls(true)
+      .keepAliveTime(15, TimeUnit.SECONDS)
+      .keepAliveTimeout(5, TimeUnit.SECONDS)
+      .keepAliveWithoutCalls(false)
       .resource[IO]
       .flatMap(channel => ReplicatorRemoteServiceFs2Grpc.stubResource[IO](channel))
 }

@@ -16,8 +16,8 @@ trait ProductionWorkerRpcClient extends WorkerRpcClient {
     NettyChannelBuilder
       .forAddress(addr.ip, addr.port)
       .usePlaintext()
-      .keepAliveTime(3, TimeUnit.SECONDS)
-      .keepAliveTimeout(2, TimeUnit.SECONDS)
+      .keepAliveTime(10, TimeUnit.SECONDS)
+      .keepAliveTimeout(5, TimeUnit.SECONDS)
       .keepAliveWithoutCalls(true)
       .resource[IO]
       .flatMap(channel => WorkerFs2Grpc.stubResource(channel))
