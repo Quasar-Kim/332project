@@ -8,6 +8,7 @@ import redsort.jobs.context.interface.FileStorage
 import io.grpc.Metadata
 import redsort.jobs.messages.ReplicatorRemoteServiceFs2Grpc
 import io.grpc.netty.shaded.io.grpc.netty.NettyServerBuilder
+import java.util.concurrent.TimeUnit
 
 trait ProductionReplicatorRemoteRpcServer extends ReplicatorRemoteRpcServer {
   override def replicatorRemoteRpcServer(
@@ -19,6 +20,8 @@ trait ProductionReplicatorRemoteRpcServer extends ReplicatorRemoteRpcServer {
       .flatMap(service =>
         NettyServerBuilder
           .forPort(port)
+          .permitKeepAliveTime(1, TimeUnit.SECONDS)
+          .permitKeepAliveWithoutCalls(true)
           .addService(service)
           .resource[IO]
       )
