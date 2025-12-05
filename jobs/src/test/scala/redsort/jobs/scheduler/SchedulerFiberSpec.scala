@@ -95,81 +95,82 @@ class SchedulerFiberSpec extends AsyncSpec {
         mainFiberQueue: Queue[IO, MainFiberEvents],
         schedulerFiberQueue: Queue[IO, SchedulerFiberEvents]
     ) = for {
-      _ <- schedulerFiberQueue.tryOfferN(
-        List(
-          new SchedulerFiberEvents.WorkerRegistration(
-            new WorkerHello(
-              wtid = 0,
-              storageInfo = Some(
-                new LocalStorageInfo(
-                  mid = None,
-                  remainingStorage = 1024,
-                  entries = Map(
-                    "@{working}/a.in" -> new FileEntryMsg(
-                      path = "@{working}/a.in",
-                      size = 1024,
-                      replicas = Seq()
-                    ),
-                    "@{working}/b.in" -> new FileEntryMsg(
-                      path = "@{working}/b.in",
-                      size = 1024,
-                      replicas = Seq()
-                    )
-                  )
-                )
-              ),
-              ip = "1.1.1.1",
-              port = 5000
-            )
-          ),
-          new SchedulerFiberEvents.WorkerRegistration(
-            new WorkerHello(
-              wtid = 1,
-              storageInfo = None,
-              ip = "1.1.1.1",
-              port = 5001
-            )
-          ),
-          new SchedulerFiberEvents.WorkerRegistration(
-            new WorkerHello(
-              wtid = 0,
-              storageInfo = Some(
-                new LocalStorageInfo(
-                  mid = None,
-                  remainingStorage = 1024,
-                  entries = Map(
-                    "@{input}/c.in" -> new FileEntryMsg(
-                      path = "@{input}/c.in",
-                      size = 1024,
-                      replicas = Seq()
-                    ),
-                    "@{input}/d.in" -> new FileEntryMsg(
-                      path = "@{input}/d.in",
-                      size = 1024,
-                      replicas = Seq()
-                    )
-                  )
-                )
-              ),
-              ip = "1.1.1.2",
-              port = 5000
-            )
-          ),
-          new SchedulerFiberEvents.WorkerRegistration(
-            new WorkerHello(
-              wtid = 1,
-              storageInfo = None,
-              ip = "1.1.1.2",
-              port = 5001
-            )
-          )
-        )
-      )
+      _ <- schedulerFiberQueue.tryOfferN(workerHellos)
       evt <- mainFiberQueue.take
     } yield {
       assume(evt.isInstanceOf[MainFiberEvents.Initialized])
     }
   }
+
+  val workerHellos =
+    List(
+      new SchedulerFiberEvents.WorkerRegistration(
+        new WorkerHello(
+          wtid = 0,
+          storageInfo = Some(
+            new LocalStorageInfo(
+              mid = None,
+              remainingStorage = 1024,
+              entries = Map(
+                "@{working}/a.in" -> new FileEntryMsg(
+                  path = "@{working}/a.in",
+                  size = 1024,
+                  replicas = Seq()
+                ),
+                "@{working}/b.in" -> new FileEntryMsg(
+                  path = "@{working}/b.in",
+                  size = 1024,
+                  replicas = Seq()
+                )
+              )
+            )
+          ),
+          ip = "1.1.1.1",
+          port = 5000
+        )
+      ),
+      new SchedulerFiberEvents.WorkerRegistration(
+        new WorkerHello(
+          wtid = 1,
+          storageInfo = None,
+          ip = "1.1.1.1",
+          port = 5001
+        )
+      ),
+      new SchedulerFiberEvents.WorkerRegistration(
+        new WorkerHello(
+          wtid = 0,
+          storageInfo = Some(
+            new LocalStorageInfo(
+              mid = None,
+              remainingStorage = 1024,
+              entries = Map(
+                "@{input}/c.in" -> new FileEntryMsg(
+                  path = "@{input}/c.in",
+                  size = 1024,
+                  replicas = Seq()
+                ),
+                "@{input}/d.in" -> new FileEntryMsg(
+                  path = "@{input}/d.in",
+                  size = 1024,
+                  replicas = Seq()
+                )
+              )
+            )
+          ),
+          ip = "1.1.1.2",
+          port = 5000
+        )
+      ),
+      new SchedulerFiberEvents.WorkerRegistration(
+        new WorkerHello(
+          wtid = 1,
+          storageInfo = None,
+          ip = "1.1.1.2",
+          port = 5001
+        )
+      )
+    )
 
   val jobSpecA = new JobSpec(name = "a", args = Seq(), inputs = Seq(), outputs = Seq())
   val jobSpecB = new JobSpec(name = "b", args = Seq(), inputs = Seq(), outputs = Seq())
@@ -181,6 +182,13 @@ class SchedulerFiberSpec extends AsyncSpec {
     jobSpecB,
     jobSpecC,
     jobSpecD
+  )
+
+  val allInitializedEvt = new RpcServerFiberEvents.AllWorkersInitialized(
+    Map(
+      0 -> new NetAddr("1.1.1.1", 4999),
+      1 -> new NetAddr("1.1.1.2", 4999)
+    )
   )
 
   behavior of "SchedulerFiber (upon receiving WorkerRegistration)"
@@ -243,6 +251,53 @@ class SchedulerFiberSpec extends AsyncSpec {
       .timeout(1.second)
   }
 
+  it should "initialize worker state even if already initialized" in {
+    val f = fixture
+    val workerHello = new WorkerHello(
+      wtid = 0,
+      storageInfo = Some(
+        new LocalStorageInfo(
+          mid = None,
+          remainingStorage = -1,
+          entries = Map(
+            "@{working}/x" -> new FileEntryMsg(
+              path = "@{working}/x",
+              size = 1024,
+              replicas = Seq()
+            ),
+            "@{working}/y" -> new FileEntryMsg(
+              path = "@{working}/y",
+              size = 1024,
+              replicas = Seq()
+            )
+          )
+        )
+      ),
+      ip = "1.1.1.1",
+      port = 5000
+    )
+
+    f.startSchedulerFiber
+      .use { case (stateR, mainFiberQueue, schedulerFiberQueue, rpcClientFiberQueues, _) =>
+        for {
+          _ <- f.initAll(stateR, mainFiberQueue, schedulerFiberQueue)
+          state <- stateR.get
+
+          // register worker (0, 0), but with different files
+          _ <- schedulerFiberQueue.offer(new SchedulerFiberEvents.WorkerRegistration(workerHello))
+          _ <- IO.sleep(100.millis)
+          state <- stateR.get
+        } yield {
+          val workerState = state.schedulerFiber.workers(new Wid(0, 0))
+          workerState.initialized shouldBe (true)
+
+          // file entries should not be updated
+          state.schedulerFiber.files(0).keySet shouldBe Set("@{working}/a.in", "@{working}/b.in")
+        }
+      }
+      .timeout(1.second)
+  }
+
   it should "emit Initialized event to main fiber when all workers are registered and change state to Idle" in {
     val f = fixture
 
@@ -266,12 +321,6 @@ class SchedulerFiberSpec extends AsyncSpec {
 
   it should "emit AllInitialized events to RPC server fiber when all workers are registerd" in {
     val f = fixture
-    val allInitializedEvt = new RpcServerFiberEvents.AllWorkersInitialized(
-      Map(
-        0 -> new NetAddr("1.1.1.1", 4999),
-        1 -> new NetAddr("1.1.1.2", 4999)
-      )
-    )
 
     f.startSchedulerFiber
       .use {
@@ -321,13 +370,33 @@ class SchedulerFiberSpec extends AsyncSpec {
       .timeout(1.second)
   }
 
-  // it should "initialize worker state and enqueue WorkerUp if worker status is initialized but DOWN"
+  it should "emit AllInitialized event to RPC server fiber when already register worker registers again" in {
+    val f = fixture
 
-  // it should "trigger reschedule if worker status is UP"
+    f.startSchedulerFiber
+      .use {
+        case (
+              stateR,
+              mainFiberQueue,
+              schedulerFiberQueue,
+              rpcClientFiberQueues,
+              rpcServerFiberQueue
+            ) =>
+          for {
+            _ <- f.initAll(stateR, mainFiberQueue, schedulerFiberQueue)
 
-  // behavior of "SchedulerFiber (upon receiving HeartbeatTimeout)"
+            // empty server fiber queue
+            _ <- rpcServerFiberQueue.tryTakeN(None)
 
-  // it should "detect fault and reschedule jobs"
+            // register worker (0, 0) again
+            _ <- schedulerFiberQueue.offer(workerHellos(0))
+            evt <- rpcServerFiberQueue.take
+          } yield {
+            evt shouldBe (allInitializedEvt)
+          }
+      }
+      .timeout(1.second)
+  }
 
   behavior of "SchedulerFiber (upon receiving Halt)"
 

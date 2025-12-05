@@ -55,15 +55,6 @@ class PartitionJobHandlerSpec extends AsyncFlatSpec with AsyncIOSpec with Matche
     val inputContents = records.fold(ByteString.empty)((acc, s) => acc.concat(s))
   }
 
-  // "PartitionJobHandler.isInPartition" should "determine whether key is in partition using lexicographical ordering" in {
-  //   val key = ByteString.fromHex("11112233445566778899")
-  //   val partition = (
-  //     ByteString.fromHex("11112233445566778899"),
-  //     MAX_KEY
-  //   )
-  //   isInPartition(key, partition) should be(true)
-  // }
-
   "PartitionJobHandler.apply" should "separates simple data in the partition (left inclusive)" in {
     val f = fixture
     val inputPathStr = "/data/input_simple"
@@ -168,5 +159,5 @@ class PartitionJobHandlerSpec extends AsyncFlatSpec with AsyncIOSpec with Matche
       firstPartitionBytes shouldBe (f.inputContents.toByteArray())
     }
   }
-  
+
 }

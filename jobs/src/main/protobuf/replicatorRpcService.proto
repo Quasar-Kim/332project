@@ -22,11 +22,13 @@ service ReplicatorRemoteService {
 }
 
 message PushRequest {
+  /* symbolic path of the file to push. */
   string path = 1;
   int32 dst = 2;
 }
 
 message PullRequest {
+  /* symbolic path of the file to pull. */
   string path = 1;
   int32 src = 2;
 }
@@ -49,8 +51,10 @@ message ReadRequest {
 
 
 message WriteRequest {
-  optional string path = 1;
-  bytes data = 2;
+  oneof payload {
+    string path = 1;
+    bytes data = 2;
+  }
 }
 
 message Packet {

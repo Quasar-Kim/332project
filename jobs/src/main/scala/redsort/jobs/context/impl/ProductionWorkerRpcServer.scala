@@ -9,6 +9,7 @@ import io.grpc.{Server, ServerServiceDefinition}
 import io.grpc.netty.shaded.io.grpc.netty.NettyServerBuilder
 import redsort.jobs.messages.WorkerFs2Grpc
 import io.grpc.Metadata
+import java.util.concurrent.TimeUnit
 
 trait ProductionWorkerRpcServer extends WorkerRpcServer {
   override def workerRpcServer(grpc: WorkerFs2Grpc[IO, Metadata], port: Int): Resource[IO, Server] =
@@ -17,6 +18,8 @@ trait ProductionWorkerRpcServer extends WorkerRpcServer {
       .flatMap(service =>
         NettyServerBuilder
           .forPort(port)
+          .permitKeepAliveTime(1, TimeUnit.SECONDS)
+          .permitKeepAliveWithoutCalls(true)
           .addService(service)
           .resource[IO]
       )

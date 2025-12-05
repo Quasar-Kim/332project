@@ -19,6 +19,7 @@ import monocle.syntax.all._
 import io.grpc.Metadata
 import redsort.jobs.workers.SharedState
 import redsort.jobs.RPChelper
+import cats.effect.std.Random
 
 trait JobRunner {
   def addHandler(entry: Tuple2[String, JobHandler]): IO[JobRunner]
@@ -57,8 +58,9 @@ object JobRunner {
             }
           )
           _ <- logger.debug(s"$wid: got job spec: ${spec}")
-          _ <- logger.debug(s"$wid: preparing inputs for job ${spec.name}...")
+
           // prepare inputs and outputs
+          _ <- logger.debug(s"$wid: preparing inputs for job ${spec.name}...")
           inputs <- prepareInputs(spec.inputs.map(FileEntry.fromMsg(_)))
           outputs <- prepareOuptputs(spec.outputs.map(FileEntry.fromMsg(_)))
 
@@ -80,8 +82,10 @@ object JobRunner {
             s"$wid: handler for job ${spec.name} returned, took ${(end - start) / 1000}"
           )
 
-          // job was successful, create job result
-          outputs <- resolveFileSizes(spec.outputs, ctx)
+          // job was successful, replicate all output files, find
+          // their actual sizes, then create job result
+          replicatedOutputs <- replicateOutputs(spec.outputs, ctx)
+          outputs <- resolveFileSizes(replicatedOutputs, ctx)
         } yield {
           val ret = retval match {
             case Some(buf) => Some(ByteString.copyFrom(buf))
@@ -105,28 +109,41 @@ object JobRunner {
 
       def pullMissingFiles(inputs: Seq[FileEntry], mid: Int): IO[Unit] =
         inputs
-          .filter(!_.replicas.contains(mid))
           .traverse { entry =>
-            val sources = entry.replicas.filter(_ != mid)
-            tryPull(entry, sources)
+            ctx.exists(Directories.resolvePath(dirs, Path(entry.path)).toString).flatMap {
+              case true  => IO.unit
+              case false => {
+                val sources = entry.replicas.filter(_ != mid)
+                val wrongReplicas = entry.replicas.contains(mid)
+                IO.whenA(wrongReplicas)(
+                  logger.warn(
+                    s"file ${entry.path} does not exists even though `replicas` field contains worker's mid ($mid). This is expected if this machine was restarted due to machine fault."
+                  )
+                ) >>
+                  tryPull(entry, sources)
+              }
+            }
           }
           .map(_ => IO.unit)
 
       def tryPull(entry: FileEntry, sources: Seq[Mid]): IO[Unit] = {
-        // TODO: treat sources.length == 0 as input replication failure
-        val request = new PullRequest(path = entry.path, src = sources.head)
-        pullWithRetry(request).attempt.flatMap {
-          case Left(err) => tryPull(entry, sources.tail)
-          case Right(_)  => IO.unit
+        sources match {
+          case Seq() =>
+            logger.error(s"failed to pull missing file $entry") >>
+              IO.raiseError(
+                WorkerErrorWrapper(
+                  WorkerError(kind = WorkerErrorKind.INPUT_REPLICATION_ERROR, inner = None)
+                )
+              )
+          case head +: tail => {
+            val request = new PullRequest(path = entry.path, src = head)
+            pullWithRetry(request).attempt.flatMap {
+              case Left(err) => tryPull(entry, tail)
+              case Right(_)  => IO.unit
+            }
+          }
         }
       }
-
-      // NOTE: this will retry pull until local RPC service becomes available, and
-      // will NOT retry on replication failure.
-      private def pullWithRetry(request: PullRequest): IO[ReplicationResult] =
-        replicatorClient
-          .pull(request, new Metadata)
-          .handleErrorWith(RPChelper.handleRpcErrorWithRetry(pullWithRetry(request)))
 
       def prepareOuptputs(outputs: Seq[FileEntry]): IO[Seq[Path]] =
         IO.pure(fileEntriesToPaths(outputs))
@@ -146,11 +163,78 @@ object JobRunner {
         new WorkerErrorWrapper(workerError)
       }
 
+      def replicateOutputs(entries: Seq[FileEntryMsg], ctx: FileStorage): IO[Seq[FileEntryMsg]] =
+        entries
+          .traverse { entry =>
+            // only replicate files in working directory
+            if (entry.path.startsWith("@{working}")) {
+              for {
+                candidates <- replicationDstCandidates
+                replicatedEntry <-
+                  candidates match {
+                    case List() => IO.pure(entry)
+
+                    // If there are only two machines in the cluster and one machines goes down it is impossible to
+                    // replciate output.
+                    // Ignore error in this case.
+                    case List(mid) =>
+                      tryPush(entry, candidates).orElse(
+                        logger.error(
+                          s"suppressing push error because there are only two machines in cluster"
+                        ) >> IO.pure(entry)
+                      )
+
+                    case _ => tryPush(entry, candidates)
+                  }
+              } yield replicatedEntry
+            } else IO.pure(entry)
+          }
+
+      def replicationDstCandidates: IO[List[Mid]] =
+        stateR.get.flatMap { s =>
+          val candidates = s.replicatorAddrs.keys.filter(_ != s.wid.get.mid)
+          Random[IO].shuffleList(candidates.toList)
+        }
+
+      def tryPush(entry: FileEntryMsg, dstCandidates: Seq[Mid]): IO[FileEntryMsg] =
+        dstCandidates match {
+          case Seq() =>
+            logger.error(s"failed to push output file ${entry.path}") >>
+              IO.raiseError(
+                WorkerErrorWrapper(
+                  WorkerError(kind = WorkerErrorKind.OUTPUT_REPLICATION_ERROR, inner = None)
+                )
+              )
+
+          case mid +: nextCandidates => {
+            val request = PushRequest(path = entry.path, dst = mid)
+            pushWithRetry(request).attempt.flatMap {
+              case Left(err) => tryPush(entry, nextCandidates)
+              case Right(_)  =>
+                logger.debug(s"pushed ${entry.path} to $mid") >> IO.pure(
+                  entry.focus(_.replicas).modify(_.appended(mid))
+                )
+            }
+          }
+        }
+
       def resolveFileSizes(entries: Seq[FileEntryMsg], ctx: FileStorage): IO[Seq[FileEntryMsg]] =
         entries.traverse { entry =>
           val path = Directories.resolvePath(dirs, Path(entry.path))
           ctx.fileSize(path.toString).map(size => entry.focus(_.size).replace(size))
         }
+
+      // NOTE: these methods will retry pull until local RPC service becomes available, and
+      // will NOT retry on replication failure.
+      private def pullWithRetry(request: PullRequest): IO[ReplicationResult] =
+        replicatorClient
+          .pull(request, new Metadata)
+          .handleErrorWith(RPChelper.handleRpcErrorWithRetry(pullWithRetry(request)))
+
+      private def pushWithRetry(request: PushRequest): IO[ReplicationResult] =
+        replicatorClient
+          .push(request, new Metadata)
+          .handleErrorWith(RPChelper.handleRpcErrorWithRetry(pushWithRetry(request)))
 
       override def getHandlers: Map[String, JobHandler] = handlers
     })

@@ -39,4 +39,6 @@ jobs:
         # 3. Add the binary location to GITHUB_PATH (PATH may not does not persist across steps)
         echo "$PWD/64" >> $GITHUB_PATH
     - name: Run tests
+      env:
+        SBT_OPTS: "-Xmx4G"
       run: sbt test

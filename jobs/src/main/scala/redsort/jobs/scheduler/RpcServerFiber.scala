@@ -49,9 +49,6 @@ object SchedulerRpcService {
 
       override def notifyUp(request: NotifyUpRequest, ctx: Metadata): IO[Empty] = ???
 
-      // NOTE: this method should be ALSO considered as heartbeat message,
-      // otherwise in case where some event that triggers reschedule arrives later than this message
-      // can corrupt worker state.
       override def registerWorker(hello: WorkerHello, meta: Metadata): IO[SchedulerHello] =
         for {
           netAddr <- IO.pure(new NetAddr(hello.ip, hello.port))
