@@ -5,7 +5,6 @@ import cats.effect._
 import cats.syntax.all._
 import org.log4s._
 import redsort.{AsyncSpec, NetworkTest}
-import org.scalatest.tags.Slow
 import redsort.AsyncFunSpec
 import scala.sys.process._
 import java.nio.file.Files
@@ -20,12 +19,14 @@ import java.nio.charset.StandardCharsets
 import redsort.jobs.{WorkerSimulator, SchedulerSimulator}
 import java.net.URLClassLoader
 import org.scalatest.time.Span
+import org.scalatest.tagobjects.Slow
+import java.io.File
 
 class FaultToleranceSpec extends AsyncFunSpec {
   override val timeLimit: Span = 30.seconds
 
   /** Setup directories used by workers */
-  def setup(name: String) = {
+  def setup(name: String): Path = {
     val baseDir = Paths.get(s"target/test-jobs-fault-tolerance/$name")
 
     // clean previous run directory
@@ -62,6 +63,8 @@ class FaultToleranceSpec extends AsyncFunSpec {
       baseDir.resolve("worker1").resolve("inputs").resolve("input.1"),
       "Hello scala!".getBytes()
     )
+
+    baseDir
   }
 
   /** Returns `Resource[IO, Process]` for scheduler and workers */
@@ -142,20 +145,10 @@ class FaultToleranceSpec extends AsyncFunSpec {
       IO(proc.destroy())
     })
 
-  /*
-    All test cases spawns two workers that perform following jobs in sequence:
-      - job "length": read input file `input.<n>` and writes length of it as string to file `@{working}/length.<n>`.
-      - job "sum": read all output files produced by job "length", sum all lengths, then write it to `@{otuput}/sum.<n>`.
-   */
-
-  /*
-    Worker 0 will kill itself while handling job "length", then will respawn after 1 seconds.
-    No intermediate files gets lost in this case.
-   */
-  test("machine restarting shortly while running job", NetworkTest) {
-    setup("while-running-job_short")
+  def faultToleranceTest(name: String, recoverAfter: Duration) = {
+    val baseDir = setup(name)
     val (schedulerResource, workerResources) =
-      schedulerAndWorkerProcs("while-running-job_short", 0)
+      schedulerAndWorkerProcs(name, 0)
 
     val res = for {
       // start all processes, while waiting for worker 0 to kill itself
@@ -164,8 +157,8 @@ class FaultToleranceSpec extends AsyncFunSpec {
       workerZeroProc <- workerResources(0)
       _ <- IO(assume(workerZeroProc.exitValue() == 137)).toResource
 
-      // wait for 1 seconds, then restart worker 0
-      _ <- IO.sleep(1.second).toResource
+      // wait for N seconds, then restart worker 0
+      _ <- IO.sleep(recoverAfter).toResource
       workerZeroProc <- workerResources(2)
 
       // wait for all processes to exit normally
@@ -174,16 +167,25 @@ class FaultToleranceSpec extends AsyncFunSpec {
       _ <- IO(workerOneProc.exitValue() shouldBe 0).toResource
 
       // test outputs
-      baseDir = Paths.get(s"target/test-jobs-fault-tolerance/while-running-job_short")
       outZero <- IO(
         new String(
-          Files.readAllBytes(baseDir.resolve("worker0").resolve("outputs").resolve("sum.0")),
+          Files.readAllBytes(
+            (new File(baseDir.resolve("worker0").resolve("outputs").toString()))
+              .listFiles()
+              .apply(0)
+              .toPath()
+          ),
           StandardCharsets.US_ASCII
         )
       ).toResource
       outOne <- IO(
         new String(
-          Files.readAllBytes(baseDir.resolve("worker1").resolve("outputs").resolve("sum.1")),
+          Files.readAllBytes(
+            (new File(baseDir.resolve("worker1").resolve("outputs").toString()))
+              .listFiles()
+              .apply(0)
+              .toPath()
+          ),
           StandardCharsets.US_ASCII
         )
       ).toResource
@@ -193,5 +195,36 @@ class FaultToleranceSpec extends AsyncFunSpec {
     }
 
     res.use(_ => IO.unit)
+  }
+
+  /*
+    All test cases spawns two workers that perform following jobs in sequence:
+      - job "length": read input file `input.<n>` and writes length of it as string to file `@{working}/length.<n>`.
+      - job "sum": read all output files produced by job "length", sum all lengths, then write it to `@{otuput}/sum.<n>`.
+
+    Worker 0 will kill itself while handling job "length", then will respawn after N seconds (where N is case specific).
+   */
+
+  /* Restart worker 0 after 1 seconds while running job "length".
+     No files are lost in this case. */
+  test("machine restarting after 1 second while running job length", NetworkTest, Slow) {
+    faultToleranceTest("while-running-job-length_short", recoverAfter = 1.second)
+  }
+
+  /* Same as above case, but restart worker 0 after 10 seconds. This is long enough for replicator
+     to give up pull/push to worker 0. */
+  ignore("machine restarting after 10 seconds while running job length", NetworkTest, Slow) {
+    faultToleranceTest("while-running-job-length_long", recoverAfter = 10.second)
+  }
+
+  /* Restart worker 0 after 1 seconds while running job "sum".
+     This requires restarted worker to pull missing files from another worker. */
+  test("machine restarting after 1 seconds while running job sum", NetworkTest, Slow) {
+    faultToleranceTest("while-running-job-sum_short", recoverAfter = 1.second)
+  }
+
+  /* "Long" variant of above test. */
+  ignore("machine restarting after 10 seconds while running job sum", NetworkTest, Slow) {
+    faultToleranceTest("while-running-job-sum_long", recoverAfter = 10.second)
   }
 }

@@ -57,62 +57,64 @@ object SchedulerSimulator
 
   def startScheduler(args: SchedulerSimArgs): IO[Unit] = {
     args.testName match {
-      case "while-running-job_short" => {
-        Scheduler(
-          port = args.port,
-          numMachines = 2,
-          numWorkersPerMachine = 1,
-          ctx = SchedulerSimCtx
-        ) { scheduler =>
-          for {
-            initialFiles <- scheduler.waitInit
-            _ <- scheduler.runJobs(
-              Seq(
-                new JobSpec(
-                  name = "length",
-                  args = Seq(),
-                  inputs = Seq(initialFiles(0).head._2),
-                  outputs =
-                    Seq(new FileEntry(path = "@{working}/length.0", size = -1, replicas = Seq(0)))
-                ),
-                new JobSpec(
-                  name = "length",
-                  args = Seq(),
-                  inputs = Seq(initialFiles(1).head._2),
-                  outputs =
-                    Seq(new FileEntry(path = "@{working}/length.1", size = -1, replicas = Seq(1)))
-                )
-              )
-            )
-            _ <- scheduler.runJobs(
-              Seq(
-                new JobSpec(
-                  name = "sum",
-                  args = Seq(),
-                  inputs = Seq(
-                    new FileEntry(path = "@{working}/length.0", size = -1, replicas = Seq(0, 1)),
-                    new FileEntry(path = "@{working}/length.1", size = -1, replicas = Seq(1, 0))
-                  ),
-                  outputs =
-                    Seq(new FileEntry(path = "@{output}/sum.0", size = -1, replicas = Seq(0)))
-                ),
-                new JobSpec(
-                  name = "sum",
-                  args = Seq(),
-                  inputs = Seq(
-                    new FileEntry(path = "@{working}/length.0", size = -1, replicas = Seq(0, 1)),
-                    new FileEntry(path = "@{working}/length.1", size = -1, replicas = Seq(1, 0))
-                  ),
-                  outputs =
-                    Seq(new FileEntry(path = "@{output}/sum.1", size = -1, replicas = Seq(1)))
-                )
-              )
-            )
-            _ <- scheduler.complete
-          } yield ()
-        }
-      }
+      case "while-running-job-length_short" | "while-running-job-length_long" |
+          "while-running-job-sum_short" | "while-running-job-sum_long" =>
+        twoMachineTest(args)
       case _ => IO.raiseError(new RuntimeException(s"invalid test name: ${args.testName}"))
     }
   }
+
+  def twoMachineTest(args: SchedulerSimArgs): IO[Unit] =
+    Scheduler(
+      port = args.port,
+      numMachines = 2,
+      numWorkersPerMachine = 1,
+      ctx = SchedulerSimCtx
+    ) { scheduler =>
+      for {
+        initialFiles <- scheduler.waitInit
+        _ <- scheduler.runJobs(
+          Seq(
+            new JobSpec(
+              name = "length",
+              args = Seq(),
+              inputs = Seq(initialFiles(0).head._2),
+              outputs =
+                Seq(new FileEntry(path = "@{working}/length.0", size = -1, replicas = Seq(0)))
+            ),
+            new JobSpec(
+              name = "length",
+              args = Seq(),
+              inputs = Seq(initialFiles(1).head._2),
+              outputs =
+                Seq(new FileEntry(path = "@{working}/length.1", size = -1, replicas = Seq(1)))
+            )
+          )
+        )
+        _ <- scheduler.runJobs(
+          Seq(
+            new JobSpec(
+              name = "sum",
+              args = Seq(),
+              inputs = Seq(
+                new FileEntry(path = "@{working}/length.0", size = -1, replicas = Seq(0, 1)),
+                new FileEntry(path = "@{working}/length.1", size = -1, replicas = Seq(1, 0))
+              ),
+              outputs = Seq(new FileEntry(path = "@{output}/sum.0", size = -1, replicas = Seq(0)))
+            ),
+            new JobSpec(
+              name = "sum",
+              args = Seq(),
+              inputs = Seq(
+                new FileEntry(path = "@{working}/length.0", size = -1, replicas = Seq(0, 1)),
+                new FileEntry(path = "@{working}/length.1", size = -1, replicas = Seq(1, 0))
+              ),
+              outputs = Seq(new FileEntry(path = "@{output}/sum.1", size = -1, replicas = Seq(1)))
+            )
+          )
+        )
+        _ <- scheduler.complete
+      } yield ()
+    }
+
 }

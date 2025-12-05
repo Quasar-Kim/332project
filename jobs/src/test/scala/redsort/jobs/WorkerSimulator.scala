@@ -99,35 +99,44 @@ object WorkerSimulator extends CommandIOApp(name = "worker-smulator", header = "
         args.testName + s".worker${args.workerId}" + (if (args.suicide) ".dead" else "")
       )
         .use { _ =>
-          IO.sleep(args.workerId * 1.seconds) >>
-            startWorker(args)
+          startWorker(args)
         }
         .map(_ => ExitCode.Success)
     }
 
   def startWorker(args: WorkerSimArgs): IO[Unit] = {
     args.testName match {
-      case "while-running-job_short" => {
+      case "while-running-job-length_short" | "while-running-job-length_long" => {
         val handlers = Map(
           "length" -> new LengthJobHandler(suicide = args.suicide, logger = logger),
-          "sum" -> new SumJobHandler(suicide = false)
+          "sum" -> new SumJobHandler(suicide = false, logger = logger)
         )
-
-        Worker(
-          handlerMap = handlers,
-          masterAddr = new NetAddr("127.0.0.1", args.masterPort),
-          inputDirectories = Seq(Path(args.inputDir)),
-          outputDirectory = Path(args.outputDir),
-          wtid = 0,
-          port = args.basePort + 1,
-          ctx = WorkerSimCtx,
-          replicatorLocalPort = args.basePort + 2,
-          replicatorRemotePort = args.basePort
-        ) { worker => worker.waitForComplete }
+        twoMachineTest(args, handlers)
       }
+      case "while-running-job-sum_short" | "while-running-job-sum_long" => {
+        val handlers = Map(
+          "length" -> new LengthJobHandler(suicide = false, logger = logger),
+          "sum" -> new SumJobHandler(suicide = args.suicide, logger = logger)
+        )
+        twoMachineTest(args, handlers)
+      }
+
       case _ => IO.raiseError(new RuntimeException(s"invalid test name: ${args.testName}"))
     }
   }
+
+  def twoMachineTest(args: WorkerSimArgs, handlers: Map[String, JobHandler]): IO[Unit] =
+    Worker(
+      handlerMap = handlers,
+      masterAddr = new NetAddr("127.0.0.1", args.masterPort),
+      inputDirectories = Seq(Path(args.inputDir)),
+      outputDirectory = Path(args.outputDir),
+      wtid = 0,
+      port = args.basePort + 1,
+      ctx = WorkerSimCtx,
+      replicatorLocalPort = args.basePort + 2,
+      replicatorRemotePort = args.basePort
+    ) { worker => worker.waitForComplete }
 }
 
 class LengthJobHandler(suicide: Boolean, logger: SourceLogger) extends JobHandler {
@@ -143,7 +152,7 @@ class LengthJobHandler(suicide: Boolean, logger: SourceLogger) extends JobHandle
       _ <- IO.whenA(suicide)(
         for {
           _ <- ctx.deleteRecursively(d.outputDirectory.toString)
-          _ <- logger.error("MACHINE FAULT")
+          _ <- logger.error("MACHINE FAULT (from handler job)")
           _ <- IO(Runtime.getRuntime.halt(137))
         } yield ()
       )
@@ -154,7 +163,7 @@ class LengthJobHandler(suicide: Boolean, logger: SourceLogger) extends JobHandle
     } yield None
 }
 
-class SumJobHandler(suicide: Boolean) extends JobHandler {
+class SumJobHandler(suicide: Boolean, logger: SourceLogger) extends JobHandler {
   override def apply(
       args: Seq[any.Any],
       inputs: Seq[Path],
@@ -164,6 +173,14 @@ class SumJobHandler(suicide: Boolean) extends JobHandler {
   ): IO[Option[Array[Byte]]] =
     for {
       contentsA <- ctx.readAll(inputs(0).toString)
+      _ <- IO.whenA(suicide)(
+        for {
+          _ <- ctx.deleteRecursively(d.outputDirectory.toString)
+          _ <- logger.error("MACHINE FAULT (from handler sum)")
+          _ <- IO(Runtime.getRuntime.halt(137))
+        } yield ()
+      )
+
       lengthA <- IO((new String(contentsA, StandardCharsets.US_ASCII)).toInt)
       contentsB <- ctx.readAll(inputs(1).toString)
       lengthB <- IO(new String(contentsB, StandardCharsets.US_ASCII).toInt)
