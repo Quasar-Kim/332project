@@ -24,6 +24,8 @@ jobs:
           distribution: 'temurin'
           cache: 'sbt'
 
+      - uses: sbt/setup-sbt@v1
+
       - name: Build artifacts
         run: sbt assembly
 
