@@ -213,7 +213,7 @@ class FaultToleranceSpec extends AsyncFunSpec {
 
   /* Same as above case, but restart worker 0 after 10 seconds. This is long enough for replicator
      to give up pull/push to worker 0. */
-  ignore("machine restarting after 10 seconds while running job length", NetworkTest, Slow) {
+  test("machine restarting after 10 seconds while running job length", NetworkTest, Slow) {
     faultToleranceTest("while-running-job-length_long", recoverAfter = 10.second)
   }
 
@@ -224,7 +224,7 @@ class FaultToleranceSpec extends AsyncFunSpec {
   }
 
   /* "Long" variant of above test. */
-  ignore("machine restarting after 10 seconds while running job sum", NetworkTest, Slow) {
+  test("machine restarting after 10 seconds while running job sum", NetworkTest, Slow) {
     faultToleranceTest("while-running-job-sum_long", recoverAfter = 10.second)
   }
 }
