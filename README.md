@@ -12,7 +12,7 @@ Run `master.jar` with number of worker machines on master machine. Following com
 java -jar master.jar 2
 ```
 
-Run `worker.jar` with input directories, output directory, and network address of master machine. Following command will start `worker` input directories `/data1/input` and `/data2/input`, output directory set to `/home/red/data`, and will try registration to master machine at `141.223.91.80:30040`.
+Run `worker.jar` on worker machines with input directories, output directory, and network address of master machine. Following command will start `worker` input directories `/data1/input` and `/data2/input`, output directory set to `/home/red/data`, and will try registration to master machine at `141.223.91.80:30040`.
 
 ```
 java -jar worker.jar 141.223.91.80:30040 -I /data1/input /data2/input -O /home/red/data
@@ -34,9 +34,9 @@ This will build `master.jar` under `master/target/scala-2.XX` and `worker.jar` u
 
 This project consists of three subprojects.
 
-- `redsort.jobs`: fault-tolerant job runner infrastructure library. You can think of this as a primitive, ad-hoc version of akka actors.
-- `redsort.master`: master binary that orchestrates workers to perform distributed sorting. Implemented on top of `Scheduler` providied by `redsort.jobs`.
-- `redsort.worker`: worker binary that does the actual distributed sorting. Implemented on top of `Worker` provided by `redsort.jobs`.
+- `redsort.jobs`: fault-tolerant job runner infrastructure library. Provides `Scheduler` that dispatches jobs to workers, and `Worker` that runs registered jobs when requested by `Scheduler`. Lives in `jobs` directory.
+- `redsort.master`: master binary that orchestrates workers to perform distributed sorting. Implemented on top of `Scheduler` providied by `redsort.jobs`. Lives in `master` directory.
+- `redsort.worker`: worker binary that does the actual distributed sorting. Implemented on top of `Worker` provided by `redsort.jobs`. Lives in `worker` directory.
 
 Some useful resources:
 
